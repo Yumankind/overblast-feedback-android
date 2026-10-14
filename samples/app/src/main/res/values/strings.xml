@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Feedback sample</string>
+    <!-- Paste a feedback key from the console's Feedback keys page. Public by design, so a resource is fine. -->
+    <string name="feedback_key">obfk_REPLACE_WITH_YOUR_KEY</string>
+</resources>

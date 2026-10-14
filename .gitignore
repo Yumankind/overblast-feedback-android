@@ -1,0 +1,14 @@
+# The wrapper (gradlew, gradlew.bat, gradle/wrapper/gradle-wrapper.jar) IS committed, so the build
+# runs with `./gradlew` on a fresh clone and on JitPack. What is ignored is what a build writes.
+.gradle/
+build/
+*/build/
+*/*/build/
+# The Android SDK path is per machine: set ANDROID_HOME, or keep a local.properties that never travels.
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+.kotlin/

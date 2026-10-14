@@ -1,0 +1,16 @@
+# HOW JITPACK BUILDS THIS. The wrapper is committed (gradlew, gradlew.bat and the jar), so JitPack runs
+# the same Gradle the repository pins, and the install step names the three library modules: the
+# sample app is never published.
+#
+# JitPack serves a multi-module repository under `com.github.<owner>.<repo>`, so the group is stated
+# here rather than taken from gradle.properties, whose `app.overblast` is the coordinate this library
+# would publish under to Maven Central. The artifact ids are the module names: `feedback`, `compose`
+# and `okhttp`.
+jdk:
+  - openjdk17
+
+install:
+  - ./gradlew -Pgroup=com.github.Yumankind.overblast-feedback-android -Pversion=$VERSION
+      :feedback:publishToMavenLocal
+      :compose:publishToMavenLocal
+      :okhttp:publishToMavenLocal

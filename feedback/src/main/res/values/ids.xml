@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The view tag `View.overblastPrivate()` sets: a view carrying it is painted over in every screenshot. -->
+    <item name="overblast_feedback_private" type="id" />
+</resources>
