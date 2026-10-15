@@ -175,4 +175,28 @@ class ErrorPromptGateTest {
     assertNull(ErrorPromptGate.kindOfRequest(422))
     assertNull(ErrorPromptGate.kindOfRequest(200))
   }
+
+  // ── Typing ───────────────────────────────────────────────────────────────────────────────────
+
+  @Test
+  fun typingIsTheKeyboardOrATextChangeInTheLastFiveSeconds() {
+    assertTrue(Typing.isTyping(10_000, imeVisible = true, lastTextChangeAt = null))
+    assertTrue(Typing.isTyping(10_000, imeVisible = false, lastTextChangeAt = 9_000))
+    assertTrue(Typing.isTyping(10_000, imeVisible = false, lastTextChangeAt = 5_001))
+    assertFalse(Typing.isTyping(10_000, imeVisible = false, lastTextChangeAt = 5_000))
+    // A field that only has focus, with no change and no keyboard, is not typing.
+    assertFalse(Typing.isTyping(10_000, imeVisible = false, lastTextChangeAt = null))
+  }
+
+  @Test
+  fun thePromptWaitsOutAPauseInTypingThenShows() {
+    now = start + 60_000
+    val g = gate()
+    g.onError("exception", on, true)
+    val lastKey = now
+    val scene = { clear.copy(typing = Typing.isTyping(now, false, lastKey)) }
+    assertTrue(g.evaluate(scene(), on, true) is PromptStep.Wait)
+    now += 5_000
+    assertEquals(PromptStep.Show, g.evaluate(scene(), on, true))
+  }
 }

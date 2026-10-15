@@ -32,6 +32,7 @@ internal class ErrorPromptPill(
   private val main = Handler(Looper.getMainLooper())
   private var view: View? = null
   private var finished = false
+  private var detach: (() -> Unit)? = null
 
   fun show() {
     val host = activity.findViewById<ViewGroup>(android.R.id.content) as? FrameLayout ?: return
@@ -89,6 +90,23 @@ internal class ErrorPromptPill(
     pill.layoutParams = lp
     host.addView(pill)
     view = pill
+    // Follow the keyboard and the system bars while it shows, so it never ends up behind the keyboard.
+    // Root insets are the window's whole insets, whatever a parent consumed on the way down.
+    val reposition = {
+      val want = dp(16f) + bottomInset(host)
+      val p = pill.layoutParams as? FrameLayout.LayoutParams
+      if (p != null && p.bottomMargin != want) {
+        p.bottomMargin = want
+        pill.layoutParams = p
+      }
+    }
+    pill.setOnApplyWindowInsetsListener { v, insets ->
+      reposition()
+      v.onApplyWindowInsets(insets)
+    }
+    val layout = android.view.ViewTreeObserver.OnGlobalLayoutListener { reposition() }
+    host.viewTreeObserver.addOnGlobalLayoutListener(layout)
+    detach = { runCatching { host.viewTreeObserver.removeOnGlobalLayoutListener(layout) } }
     if (animate(activity)) {
       pill.alpha = 0f
       pill.animate().alpha(1f).setDuration(200).start()
@@ -107,6 +125,8 @@ internal class ErrorPromptPill(
   private fun finish() {
     if (finished) return
     finished = true
+    detach?.invoke()
+    detach = null
     val v = view ?: return
     view = null
     val remove = { (v.parent as? ViewGroup)?.removeView(v) }
@@ -135,15 +155,17 @@ internal class ErrorPromptPill(
       return scale > 0f
     }
 
-    /** The person is typing: the keyboard is up, or the focused view edits text (an EditText or a Compose text field). */
-    fun typing(activity: Activity): Boolean {
+    /**
+     * The soft keyboard is up. API 30+ says so; before it, a bottom inset of more than a sixth of the
+     * window is a keyboard (a navigation bar is far smaller).
+     */
+    fun imeVisible(activity: Activity): Boolean {
       val decor = activity.window?.decorView ?: return false
-      if (Build.VERSION.SDK_INT >= 30) {
-        val insets = decor.rootWindowInsets
-        if (insets != null && insets.isVisible(WindowInsets.Type.ime())) return true
-      }
-      val focused = activity.currentFocus ?: return false
-      return runCatching { focused.onCheckIsTextEditor() && focused.isFocused }.getOrDefault(false)
+      val insets = decor.rootWindowInsets ?: return false
+      if (Build.VERSION.SDK_INT >= 30) return insets.isVisible(WindowInsets.Type.ime())
+      @Suppress("DEPRECATION")
+      val bottom = insets.systemWindowInsetBottom
+      return decor.height > 0 && bottom > decor.height / 6
     }
   }
 }
@@ -180,5 +202,53 @@ internal class PrefsConfigStore(context: Context, private val scope: String) : C
 
   private companion object {
     const val PREFS = "app.overblast.feedback.config"
+  }
+}
+
+/**
+ * When a text field's text last changed, for [Typing]: a TextWatcher on whichever EditText has focus in
+ * the resumed activity, moved as focus moves. Compose text fields are covered by the keyboard check,
+ * since a Compose field has no TextWatcher to attach.
+ */
+internal class TypingWatch {
+  @Volatile var lastChangeAt: Long? = null
+    private set
+
+  private var activity: java.lang.ref.WeakReference<Activity>? = null
+  private var field: java.lang.ref.WeakReference<TextView>? = null
+  private val watcher = object : android.text.TextWatcher {
+    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+      lastChangeAt = System.currentTimeMillis()
+    }
+    override fun afterTextChanged(s: android.text.Editable?) = Unit
+  }
+  private val focus = android.view.ViewTreeObserver.OnGlobalFocusChangeListener { _, now -> watch(now) }
+
+  fun attach(a: Activity) {
+    detach()
+    val decor = a.window?.decorView ?: return
+    activity = java.lang.ref.WeakReference(a)
+    runCatching { decor.viewTreeObserver.addOnGlobalFocusChangeListener(focus) }
+    watch(decor.findFocus())
+  }
+
+  fun detach() {
+    unwatch()
+    activity?.get()?.window?.decorView?.let { d -> runCatching { d.viewTreeObserver.removeOnGlobalFocusChangeListener(focus) } }
+    activity = null
+  }
+
+  private fun watch(v: View?) {
+    unwatch()
+    val tv = v as? TextView ?: return
+    if (!tv.onCheckIsTextEditor()) return
+    tv.addTextChangedListener(watcher)
+    field = java.lang.ref.WeakReference(tv)
+  }
+
+  private fun unwatch() {
+    field?.get()?.removeTextChangedListener(watcher)
+    field = null
   }
 }

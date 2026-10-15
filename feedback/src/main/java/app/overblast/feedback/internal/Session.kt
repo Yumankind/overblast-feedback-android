@@ -185,6 +185,8 @@ internal object CrashDecision {
   const val REASON_CRASH = 4
   const val REASON_CRASH_NATIVE = 5
   const val REASON_ANR = 6
+  const val REASON_USER_REQUESTED = 10
+  const val REASON_USER_STOPPED = 11
 
   fun kindFor(reason: Int): String = when (reason) {
     REASON_CRASH, REASON_CRASH_NATIVE -> "crash"
@@ -201,6 +203,8 @@ internal object CrashDecision {
     if (marker == null || marker.closed) return null
     val h = handler?.takeIf { it.at >= marker.start }
     val x = exit?.takeIf { it.timestamp >= marker.start }
+    // The person (or a tool on their behalf) stopped the app: a force stop, a reset from settings. Not a crash.
+    if (h == null && x != null && (x.reason == REASON_USER_REQUESTED || x.reason == REASON_USER_STOPPED)) return null
     return when {
       h != null -> CrashInfo(
         kind = "exception",

@@ -276,7 +276,8 @@ How the library knows:
   and the log to disk synchronously, then hands the crash to the handler that was installed before it,
   so the app crashes exactly as it would have and any crash reporter you use still sees it;
 - on Android 11 and later, `ActivityManager.getHistoricalProcessExitReasons`: a crash or native crash
-  is `crash`, an ANR `killed`, low memory `oom`, anything else `unknown`.
+  is `crash`, an ANR `killed`, low memory `oom`, anything else `unknown`. A stop the person asked for
+  (a force stop, or stopping the app from settings) is not a crash and is not offered.
 
 A session that ended with no record from either is sent as `kind: "unknown"`. Turn the question off
 with `FeedbackOptions(offerReportAfterCrash = false)`; the saved session is then discarded unasked.
@@ -298,8 +299,9 @@ report instead), `server_error` a request to one of your `appHosts` answered 500
 one that never answered. Requests come from `recordNetwork` or the OkHttp interceptor; with no
 `appHosts`, no request counts, and the feedback door itself never does.
 
-It stays out of the way: not in the first 10 seconds, not while a text field has focus or the keyboard
-is up, not while the sheet, the crash question or another dialog is showing, and only while an
+It stays out of the way: not in the first 10 seconds, not while the person is typing (the keyboard
+is up, or a text field changed in the last 5 seconds; a field that only has focus does not count),
+not while the sheet, the crash question or another dialog is showing, and only while an
 activity is in front (it waits up to 30 seconds for that, then gives up). It shows at most once per
 launch and once per the key's `minHoursBetween` hours, and after two closes without a report not for
 seven days. It goes by itself after about 8 seconds. TalkBack reads it politely, and with animations

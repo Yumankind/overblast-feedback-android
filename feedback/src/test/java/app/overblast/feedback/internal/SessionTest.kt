@@ -245,4 +245,15 @@ class SessionTest {
     reader.stop()
     assertEquals(listOf("A: one", "A: two"), got.map { it.msg })
   }
+
+  @Test
+  fun aStopThePersonAskedForIsNotACrash() {
+    val m = SessionMarker(100, false)
+    assertNull(CrashDecision.decide(m, null, ExitRecord(160, CrashDecision.REASON_USER_REQUESTED, "[FORCE STOP] stop app")))
+    assertNull(CrashDecision.decide(m, null, ExitRecord(160, CrashDecision.REASON_USER_STOPPED, "stopped")))
+    // A crash the handler recorded is still a crash, whatever ended the process afterwards.
+    assertEquals("handler", CrashDecision.decide(m, HandlerRecord(150, "boom", "at a"), ExitRecord(160, CrashDecision.REASON_USER_REQUESTED, null))!!.source)
+    // A stale user stop from before this session does not hide an unknown end.
+    assertEquals("marker", CrashDecision.decide(m, null, ExitRecord(50, CrashDecision.REASON_USER_REQUESTED, null))!!.source)
+  }
 }

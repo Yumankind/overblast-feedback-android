@@ -10,6 +10,17 @@ package app.overblast.feedback.internal
 //  - how often: once per process, once per `minHoursBetween` on the device, and after two closes without
 //    a report, not for seven days; errors a second apart are one prompt.
 
+/**
+ * TYPING (§3.6): the keyboard is up, or a text field's text changed in the last five seconds. A field
+ * that merely has focus (a screen that focuses its first field) does not hold the prompt back.
+ */
+internal object Typing {
+  const val WINDOW_MS = 5_000L
+
+  fun isTyping(now: Long, imeVisible: Boolean, lastTextChangeAt: Long?): Boolean =
+    imeVisible || (lastTextChangeAt != null && now >= lastTextChangeAt && now - lastTextChangeAt < WINDOW_MS)
+}
+
 /** What survives the process: when it was last shown, the closes in a row, and a seven-day pause. */
 internal data class PromptMemory(val lastShownAt: Long = 0, val closesInARow: Int = 0, val quietUntil: Long = 0)
 

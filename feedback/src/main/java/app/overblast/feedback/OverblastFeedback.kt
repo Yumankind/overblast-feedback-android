@@ -23,6 +23,8 @@ import app.overblast.feedback.internal.PrefsConfigStore
 import app.overblast.feedback.internal.PrefsPromptStore
 import app.overblast.feedback.internal.PromptScene
 import app.overblast.feedback.internal.PromptStep
+import app.overblast.feedback.internal.Typing
+import app.overblast.feedback.internal.TypingWatch
 import app.overblast.feedback.internal.DirectoryPendingFiles
 import app.overblast.feedback.internal.FeedbackContext
 import app.overblast.feedback.internal.FeedbackPayload
@@ -131,6 +133,7 @@ public object OverblastFeedback {
   private var startedActivities = 0
   private var offerShown = false
   private var offerOpen = false
+  private val typingWatch = TypingWatch()
   // Weak: the pill holds its activity, and while it is up its own view and listeners keep it alive.
   private var pillRef: WeakReference<ErrorPromptPill>? = null
   private var pill: ErrorPromptPill?
@@ -441,7 +444,7 @@ public object OverblastFeedback {
     val a = resumed?.get()?.takeIf { !it.isFinishing && !it.isDestroyed }
     val scene = PromptScene(
       foreground = a != null && startedActivities > 0,
-      typing = a?.let { ErrorPromptPill.typing(it) } ?: false,
+      typing = a != null && Typing.isTyping(System.currentTimeMillis(), ErrorPromptPill.imeVisible(a), typingWatch.lastChangeAt),
       sheetOrOfferOpen = sheetOpen || offerOpen || pill != null,
       // Another window over the activity (a dialog, a system alert) takes its focus.
       dialogUp = a != null && !a.hasWindowFocus(),
@@ -665,6 +668,7 @@ public object OverblastFeedback {
     override fun onActivityResumed(activity: Activity) {
       resumed = WeakReference(activity)
       if (shakeOn) shake?.start(activity)
+      if (config?.let { it.options.errorPrompt && it.keyConfig.config.errorPrompt.enabled } == true) typingWatch.attach(activity)
       maybeOffer()
       // The key's settings, re-read at most every five minutes while the app is used.
       config?.keyConfig?.let { kc -> if (kc.due()) registration.execute { runCatching { kc.refresh() } } }
@@ -672,6 +676,7 @@ public object OverblastFeedback {
 
     override fun onActivityPaused(activity: Activity) {
       shake?.stop()
+      typingWatch.detach()
       pill?.dismissSilently()
     }
 
