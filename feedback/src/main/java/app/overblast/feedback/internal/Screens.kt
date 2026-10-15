@@ -69,6 +69,7 @@ internal fun openPointer(
     gravity = Gravity.CENTER
     setPadding(w.dp(16f), w.dp(12f), w.dp(16f), w.dp(12f))
     accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+    TextBalance.apply(this)
   }
   root.addView(hint, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
@@ -164,6 +165,7 @@ internal fun openEditor(
   root.addView(tools, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
   root.addView(w.label(strings.editHint, 13f, ON_DARK_2).apply {
+    TextBalance.apply(this)
     gravity = Gravity.CENTER
     setPadding(w.dp(16f), w.dp(8f), w.dp(16f), w.dp(8f))
   }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))

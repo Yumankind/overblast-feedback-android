@@ -121,7 +121,10 @@ internal class CrashWatch(
           look.face(b, which == android.content.DialogInterface.BUTTON_POSITIVE)
         }
       }
-      dialog.findViewById<android.widget.TextView>(android.R.id.message)?.let { look.face(it, false) }
+      dialog.findViewById<android.widget.TextView>(android.R.id.message)?.let {
+        look.face(it, false)
+        TextBalance.apply(it)
+      }
     }
   }
 }

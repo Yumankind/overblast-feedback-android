@@ -58,6 +58,7 @@ internal class ErrorPromptPill(
       setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
       look.face(this, false)
       accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+      TextBalance.apply(this)
     }
     pill.addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
     val report = TextView(activity).apply {

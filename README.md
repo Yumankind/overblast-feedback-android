@@ -101,9 +101,11 @@ Your options can only turn these **off** for your app (`deviceVerification = fal
    there: so the team can reply.
 7. A line saying what will be sent: the message, the selected element, the screenshot, logs from this
    session, app and device details.
-8. **Send.** On success the sheet shows a check and "Sent, thank you" for a moment (or "Thanks. We
-   already know about this one and we're on it." when the team already has it), TalkBack announces
-   it, and the sheet closes. A refusal keeps the sheet open with the server's own sentence.
+8. **Send.** On success the sheet shows a check, "Sent, thank you" (or "Thanks. We already know about
+   this one and we're on it." when the team already has it) and **Done**. Done, Back, swiping the
+   handle down or tapping outside closes it; otherwise it closes by itself after about 2 seconds (4
+   for the longer sentence). TalkBack reads the line, then moves to Done, and the sheet waits while
+   Done has TalkBack's focus. A refusal keeps the sheet open with the server's own sentence.
 
 TalkBack reads every control (the categories as radio buttons, the handle with expand and collapse),
 text follows the person's font size, and with animations turned off on the phone nothing slides or

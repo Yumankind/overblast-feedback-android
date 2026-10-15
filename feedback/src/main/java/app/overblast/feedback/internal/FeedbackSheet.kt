@@ -431,14 +431,22 @@ internal class FeedbackSheet(
     send.isEnabled = true
     send.alpha = 1f
     when (result) {
-      is FeedbackResult.Sent -> confirm(if (result.known) strings.sentKnown else result.notice ?: strings.sentShort, if (result.known || result.notice != null) 2_500L else 1_500L)
-      is FeedbackResult.SavedForLater -> confirm("${result.message} ${strings.savedForLater}", 2_500L)
+      is FeedbackResult.Sent -> confirm(
+        if (result.known) strings.sentKnown else result.notice ?: strings.sentShort,
+        if (result.known || result.notice != null) ConfirmClock.Kind.LONG else ConfirmClock.Kind.THANKS,
+      )
+      is FeedbackResult.SavedForLater -> confirm("${result.message} ${strings.savedForLater}", ConfirmClock.Kind.LONG)
       is FeedbackResult.Failed -> showError(result.message)
     }
   }
 
   /** The confirmation, in the sheet: a check and one line, announced, then the sheet closes by itself. */
-  private fun confirm(text: String, holdMs: Long) {
+  /**
+   * The confirmation, in the sheet: a check, one line and Done. Done, Back, the handle and a tap
+   * outside close it at once; otherwise it closes by itself when its [ConfirmClock] runs out, which
+   * stops while TalkBack's focus is on Done. TalkBack hears the line first, then lands on Done.
+   */
+  private fun confirm(text: String, kind: ConfirmClock.Kind) {
     hideKeyboard()
     val done = LinearLayout(activity).apply {
       orientation = LinearLayout.VERTICAL
@@ -449,9 +457,32 @@ internal class FeedbackSheet(
     val line = w.label(text, 17f, p.text, bold = true).apply {
       gravity = Gravity.CENTER
       setPadding(0, w.dp(14f), 0, 0)
-      accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+      TextBalance.apply(this)
     }
     done.addView(line)
+    val clock = ConfirmClock(ConfirmClock.holdFor(kind), android.os.SystemClock.uptimeMillis())
+    confirmClock = clock
+    val doneButton = w.filledButton(strings.sentDone) { close() }.apply {
+      accessibilityDelegate = object : View.AccessibilityDelegate() {
+        override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
+          super.onInitializeAccessibilityNodeInfo(host, info)
+          info.className = android.widget.Button::class.java.name
+        }
+
+        override fun sendAccessibilityEvent(host: View, eventType: Int) {
+          super.sendAccessibilityEvent(host, eventType)
+          val now = android.os.SystemClock.uptimeMillis()
+          when (eventType) {
+            android.view.accessibility.AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED -> clock.focusIn(now)
+            android.view.accessibility.AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED -> {
+              clock.focusOut(now)
+              scheduleAutoClose(clock)
+            }
+          }
+        }
+      }
+    }
+    done.addView(doneButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = w.dp(20f) })
     // The form goes; the handle stays so the sheet still reads as the same sheet.
     for (i in sheet.childCount - 1 downTo 1) sheet.removeViewAt(i)
     sheet.addView(done, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -461,7 +492,23 @@ internal class FeedbackSheet(
       done.animate().alpha(1f).setDuration(160).start()
     }
     line.announceForAccessibilityCompat(text)
-    main.postDelayed({ close() }, holdMs)
+    // Then TalkBack's focus goes to Done, once the line has had time to be heard.
+    val a11y = activity.getSystemService(android.content.Context.ACCESSIBILITY_SERVICE) as? android.view.accessibility.AccessibilityManager
+    if (a11y?.isTouchExplorationEnabled == true) {
+      main.postDelayed({ if (!closing) doneButton.performAccessibilityAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null) }, 1_200L)
+    }
+    scheduleAutoClose(clock)
+  }
+
+  private var confirmClock: ConfirmClock? = null
+
+  /** Closes when [clock] says so; asked again when it is paused or not yet due. */
+  private fun scheduleAutoClose(clock: ConfirmClock) {
+    val left = clock.remaining(android.os.SystemClock.uptimeMillis()) ?: return
+    main.postDelayed({
+      if (clock !== confirmClock || closing) return@postDelayed
+      if (clock.due(android.os.SystemClock.uptimeMillis())) close() else scheduleAutoClose(clock)
+    }, left)
   }
 
   private fun hideKeyboard() {
@@ -479,6 +526,7 @@ internal class FeedbackSheet(
   private fun close() {
     if (closing) return
     closing = true
+    confirmClock?.close()
     hideKeyboard()
     if (!look.animate || !dialog.isShowing) {
       if (dialog.isShowing) dialog.dismiss()

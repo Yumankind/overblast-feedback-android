@@ -110,4 +110,5 @@ public data class FeedbackStrings(
   public val sheetHandle: String = "Sheet handle",
   public val expand: String = "Expand",
   public val collapse: String = "Collapse",
+  public val sentDone: String = "Done",
 )
