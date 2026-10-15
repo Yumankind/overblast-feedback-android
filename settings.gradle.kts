@@ -19,10 +19,12 @@ dependencyResolutionManagement {
 
 rootProject.name = "overblast-feedback-android"
 
-// `:feedback` is the library and the only module an app needs. `:compose` and `:okhttp` are small
-// optional add-ons, each its own artifact so that neither Compose nor OkHttp is ever forced on an app
-// that does not already use it. The sample is built here but never published.
+// `:feedback` is the library and the only module an app needs. `:compose`, `:compose-material3` and
+// `:okhttp` are small optional add-ons, each its own artifact so that neither Compose, Material 3 nor
+// OkHttp is ever forced on an app that does not already use it. The sample is built here but never
+// published.
 include(":feedback")
 include(":compose")
+include(":compose-material3")
 include(":okhttp")
 include(":samples:app")

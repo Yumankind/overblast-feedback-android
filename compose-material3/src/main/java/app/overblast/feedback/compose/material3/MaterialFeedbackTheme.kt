@@ -1,4 +1,4 @@
-package app.overblast.feedback.compose
+package app.overblast.feedback.compose.material3
 
 import android.graphics.Typeface
 import androidx.compose.material3.MaterialTheme
@@ -16,10 +16,11 @@ import app.overblast.feedback.FeedbackTheme
  *
  * ```kotlin
  * val theme = FeedbackTheme.fromMaterialTheme()
- * LaunchedEffect(theme.accent) { OverblastFeedback.setTheme(theme) }
+ * LaunchedEffect(theme) { OverblastFeedback.setTheme(theme) }
  * ```
  *
- * Needs `androidx.compose.material3` in the app, which every app with a MaterialTheme has.
+ * This module brings Material 3 as an ordinary dependency, so it is only for an app that already has
+ * a Material 3 `MaterialTheme`; the rest of the library never touches Material.
  */
 @Composable
 public fun FeedbackTheme.Companion.fromMaterialTheme(): FeedbackTheme {

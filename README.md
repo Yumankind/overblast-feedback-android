@@ -34,16 +34,24 @@ dependencyResolutionManagement {
 // build.gradle.kts
 dependencies {
     implementation("com.github.Yumankind.overblast-feedback-android:feedback:0.2.0")
-    implementation("com.github.Yumankind.overblast-feedback-android:compose:0.2.0") // optional, Compose apps
-    implementation("com.github.Yumankind.overblast-feedback-android:okhttp:0.2.0")  // optional, OkHttp apps
+    implementation("com.github.Yumankind.overblast-feedback-android:compose:0.2.0")           // optional
+    implementation("com.github.Yumankind.overblast-feedback-android:compose-material3:0.2.0") // optional
+    implementation("com.github.Yumankind.overblast-feedback-android:okhttp:0.2.0")            // optional
 }
 ```
 
+| Artifact | Add it when | What it brings |
+|---|---|---|
+| `feedback` | always | The library. No AndroidX, Material, OkHttp or JSON library |
+| `compose` | the app has Compose screens | Tap-to-select inside Compose, `Modifier.overblastPrivate()`; Compose UI, which the app has |
+| `compose-material3` | the app uses a Material 3 `MaterialTheme` and wants the sheet in its colours | `FeedbackTheme.fromMaterialTheme()`; Material 3, which the app has |
+| `okhttp` | the app uses OkHttp | The interceptor that records calls; uses the app's own OkHttp |
+
 The version is a tag on this repository; JitPack builds it on first request. This repository has
-three published modules, and JitPack serves a multi-module repository under
+four published modules, and JitPack serves a multi-module repository under
 `com.github.<owner>.<repo>:<module>`, which is where the lines above come from. The shorter
 `com.github.Yumankind:overblast-feedback-android:0.2.0` also resolves, but it brings **every** module,
-Compose included, so name the modules you want instead.
+Compose and Material 3 included, so name the modules you want instead.
 
 `:feedback` depends on nothing but the Android framework and the Kotlin standard library: no AndroidX,
 no Material, no OkHttp, no JSON library. The sheet is plain Views, the request is
@@ -113,17 +121,18 @@ FeedbackOptions(theme = FeedbackTheme(accent = 0xFF6D28D9.toInt(), typeface = br
 
 With no accent, the activity theme's `colorPrimary` is used (AppCompat and Material Components set
 it), then `android:colorPrimary`, then `android:colorAccent`, skipping a colour that would vanish on
-the sheet; text on the accent is white or black, whichever reads better. In Compose, the `:compose`
-module reads the Material 3 theme for you:
+the sheet; text on the accent is white or black, whichever reads better. In a Compose app with a
+Material 3 theme, the `compose-material3` artifact reads it for you:
 
 ```kotlin
+import app.overblast.feedback.compose.material3.fromMaterialTheme
+
 val theme = FeedbackTheme.fromMaterialTheme()   // primary colour, body font, large shape's corner
 LaunchedEffect(theme) { OverblastFeedback.setTheme(theme) }
 ```
 
 `OverblastFeedback.setTheme(theme)` changes the brand at runtime (null goes back to the options').
-`fromMaterialTheme()` needs `androidx.compose.material3` in the app; the `:compose` module does not
-bring it in.
+Material 3 lives only in `compose-material3`, so an app without it never meets a Material class.
 
 ## Options
 
@@ -443,7 +452,7 @@ on the first run rather than in a quiet absence of reports.
 
 ```bash
 ./gradlew test               # the JVM unit tests: payload, limits, redaction, anchors, logcat, retry, device signing
-./gradlew assembleRelease    # the three AARs and the sample app (unsigned)
+./gradlew assembleRelease    # the four AARs and the sample app (unsigned)
 ```
 
 The Gradle wrapper is in the repository. Point the build at an Android SDK with `ANDROID_HOME`, or
