@@ -55,6 +55,11 @@ dependencies {
   api(project(":feedback"))
   implementation(platform(libs.compose.bom))
   implementation(libs.compose.ui)
+  // Material 3 is only read by `FeedbackTheme.fromMaterialTheme()`, the one place this module touches
+  // it, and only an app with a MaterialTheme has a reason to call that, so it is compile-only: an app
+  // on Material 2 or none does not get Material 3 pulled in. The helper lives in a file of its own, so
+  // nothing else here loads a Material 3 class.
+  compileOnly(libs.compose.material3)
 }
 
 afterEvaluate {

@@ -1,13 +1,11 @@
 package app.overblast.feedback.internal
 
-import android.animation.ValueAnimator
 import android.app.Activity
 import android.content.Context
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -25,6 +23,7 @@ import app.overblast.feedback.FeedbackStrings
 internal class ErrorPromptPill(
   private val activity: Activity,
   private val strings: FeedbackStrings,
+  private val look: Look,
   private val onReport: () -> Unit,
   private val onClose: () -> Unit,
   private val onGone: () -> Unit,
@@ -36,7 +35,7 @@ internal class ErrorPromptPill(
 
   fun show() {
     val host = activity.findViewById<ViewGroup>(android.R.id.content) as? FrameLayout ?: return
-    val palette = Palette(isDark(activity))
+    val palette = look.palette
     val d = activity.resources.displayMetrics.density
     fun dp(v: Float) = (v * d + 0.5f).toInt()
 
@@ -46,7 +45,7 @@ internal class ErrorPromptPill(
       setPadding(dp(16f), dp(6f), dp(6f), dp(6f))
       background = GradientDrawable().apply {
         setColor(palette.sheet)
-        cornerRadius = dp(24f).toFloat()
+        cornerRadius = dp(look.corner * 1.5f).toFloat().coerceAtMost(dp(28f).toFloat())
         setStroke(dp(1f), palette.field)
       }
       elevation = dp(6f).toFloat()
@@ -57,6 +56,7 @@ internal class ErrorPromptPill(
       this.text = strings.errorPrompt
       setTextColor(palette.text)
       setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+      look.face(this, false)
       accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
     }
     pill.addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -64,7 +64,7 @@ internal class ErrorPromptPill(
       this.text = strings.errorPromptReport
       setTextColor(palette.accent)
       setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-      setTypeface(typeface, android.graphics.Typeface.BOLD)
+      look.face(this, true)
       setPadding(dp(12f), dp(10f), dp(8f), dp(10f))
       isClickable = true
       setOnClickListener { finish(); onReport() }
@@ -107,7 +107,7 @@ internal class ErrorPromptPill(
     val layout = android.view.ViewTreeObserver.OnGlobalLayoutListener { reposition() }
     host.viewTreeObserver.addOnGlobalLayoutListener(layout)
     detach = { runCatching { host.viewTreeObserver.removeOnGlobalLayoutListener(layout) } }
-    if (animate(activity)) {
+    if (look.animate) {
       pill.alpha = 0f
       pill.animate().alpha(1f).setDuration(200).start()
     }
@@ -130,7 +130,7 @@ internal class ErrorPromptPill(
     val v = view ?: return
     view = null
     val remove = { (v.parent as? ViewGroup)?.removeView(v) }
-    if (animate(activity) && v.isAttachedToWindow) {
+    if (look.animate && v.isAttachedToWindow) {
       v.animate().alpha(0f).setDuration(150).withEndAction { remove() }.start()
     } else {
       remove()
@@ -148,13 +148,6 @@ internal class ErrorPromptPill(
   }
 
   companion object {
-    /** Animations on, by the person's own setting: off when the animator scale is 0. */
-    fun animate(context: Context): Boolean {
-      if (Build.VERSION.SDK_INT >= 26 && !ValueAnimator.areAnimatorsEnabled()) return false
-      val scale = runCatching { Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) }.getOrDefault(1f)
-      return scale > 0f
-    }
-
     /**
      * The soft keyboard is up. API 30+ says so; before it, a bottom inset of more than a sixth of the
      * window is a keyboard (a navigation bar is far smaller).

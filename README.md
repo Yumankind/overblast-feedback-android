@@ -77,18 +77,53 @@ Your options can only turn these **off** for your app (`deviceVerification = fal
 ## What the reporter sees
 
 1. The screen is captured first, frozen, with private parts already blanked (see Privacy).
-2. A sheet slides up: a category (Bug, Idea, Question, Other; Bug by default) and the message, which
-   is the one required field.
-3. **Point at the problem** shows the frozen screenshot full screen. A tap selects the deepest
-   visible view under the finger and outlines it; **Use this** keeps it.
-4. **Include screenshot** is off until they turn it on. When on, they see the image that will be sent
-   (with the selected view outlined) and can remove it.
-5. An email field, only when your app has not said who this is. It is optional and says why it is
+2. A bottom sheet opens half way. Its handle drags it to full height (or down to close), and it goes
+   full height by itself when the keyboard comes up. **Send** sits at the sheet's bottom, so it is
+   above the keyboard at all times.
+3. At the top, the categories the key takes (Bug, Idea, Question, Other by default; none when the
+   key takes one), then a large message field, the one required field.
+4. **Point at the problem** shows the frozen screen full screen under "Tap the part that's wrong". A
+   tap outlines the view under the finger and dims the rest; **Use this** confirms it. Back in the
+   sheet, the pick is a thumbnail of that part of the screen with its label, **Change** and **Remove**.
+5. **Include screenshot** is off until they turn it on. Then they see a preview of the image that
+   will be sent; tapping it opens an editor to drag rectangles that **cover** (solid) or **blur** parts
+   of it, with **Undo** and **Clear**. Private areas are blanked in the capture itself and cannot be
+   uncovered.
+6. An email field, only when your app has not said who this is. It is optional and says why it is
    there: so the team can reply.
-6. A line saying what will be sent: the message, the selected element, the screenshot, logs from this
+7. A line saying what will be sent: the message, the selected element, the screenshot, logs from this
    session, app and device details.
-7. **Send.** A refusal is shown in the server's own sentence. The sheet follows the activity's
-   light or dark mode.
+8. **Send.** On success the sheet shows a check and "Sent, thank you" for a moment (or "Thanks. We
+   already know about this one and we're on it." when the team already has it), TalkBack announces
+   it, and the sheet closes. A refusal keeps the sheet open with the server's own sentence.
+
+TalkBack reads every control (the categories as radio buttons, the handle with expand and collapse),
+text follows the person's font size, and with animations turned off on the phone nothing slides or
+fades.
+
+## The look
+
+Everything the library draws (the sheet, its chips and buttons, the pointer and editor screens, the
+error prompt and the crash question) takes your brand from one `FeedbackTheme`; light or dark follows
+the activity.
+
+```kotlin
+FeedbackOptions(theme = FeedbackTheme(accent = 0xFF6D28D9.toInt(), typeface = brandFont, cornerRadiusDp = 20f))
+```
+
+With no accent, the activity theme's `colorPrimary` is used (AppCompat and Material Components set
+it), then `android:colorPrimary`, then `android:colorAccent`, skipping a colour that would vanish on
+the sheet; text on the accent is white or black, whichever reads better. In Compose, the `:compose`
+module reads the Material 3 theme for you:
+
+```kotlin
+val theme = FeedbackTheme.fromMaterialTheme()   // primary colour, body font, large shape's corner
+LaunchedEffect(theme) { OverblastFeedback.setTheme(theme) }
+```
+
+`OverblastFeedback.setTheme(theme)` changes the brand at runtime (null goes back to the options').
+`fromMaterialTheme()` needs `androidx.compose.material3` in the app; the `:compose` module does not
+bring it in.
 
 ## Options
 
@@ -112,6 +147,7 @@ OverblastFeedback.start(
         offerReportAfterCrash = true,    // ask once after an unexpected end, see After a crash
         errorPrompt = true,              // allow the error prompt when the key has it on
         appHosts = listOf("api.example.com"), // your own API hosts, for the error prompt
+        theme = FeedbackTheme(accent = 0xFF6D28D9.toInt()), // see The look
     ),
 )
 ```
@@ -129,6 +165,7 @@ OverblastFeedback.start(
 | `OverblastFeedback.recordNetwork(method, url, status, ms)` | One call into the report's network list |
 | `OverblastFeedback.retryPending { sent, stillPending -> }` | Sends reports kept after a 429 |
 | `OverblastFeedback.pendingCount` | How many are kept |
+| `OverblastFeedback.setTheme(theme)` | The brand for what the library draws from now on; see The look |
 | `OverblastFeedback.deviceLevel` | `ATTESTED`, `REGISTERED`, `NONE`, or null until known; see Device verification |
 
 `accountRef` is your own id for the person (a customer id, a user id); it is shown on the task so the
@@ -387,7 +424,7 @@ set to require a device refuses.
 
 | Result | When |
 |---|---|
-| `Sent(id, taskId, conversationId, notice)` | Filed. `notice` is set on `507 storage_full`: the task exists, without its files |
+| `Sent(id, taskId, conversationId, notice, known)` | Filed. `notice` is set on `507 storage_full`: the task exists, without its files. `known` is true when the team already has this problem |
 | `SavedForLater(message, retryAfterSeconds)` | `429 rate_limited`: kept on the device |
 | `Failed(status, code, message, field)` | Refused (`invalid_field`, `unknown_key`, `key_disabled`, `too_large`, `misconfigured`) or not answered (`status 0`, `code "network"`) |
 

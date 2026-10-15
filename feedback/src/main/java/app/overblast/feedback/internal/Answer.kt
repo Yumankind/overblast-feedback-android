@@ -14,6 +14,7 @@ internal object AnswerMapper {
         id = json?.get("id") as? String,
         taskId = json?.get("taskId") as? String,
         conversationId = json?.get("conversationId") as? String,
+        known = json?.get("known") == true,
       )
     }
     if (status == 507) {

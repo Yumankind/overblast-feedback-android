@@ -18,7 +18,10 @@ import app.overblast.feedback.internal.DeviceSession
 import app.overblast.feedback.internal.ErrorPromptConfig
 import app.overblast.feedback.internal.ErrorPromptGate
 import app.overblast.feedback.internal.ErrorPromptPill
+import app.overblast.feedback.internal.ImageComposer
+import app.overblast.feedback.internal.ImageEdit
 import app.overblast.feedback.internal.KeyConfigClient
+import app.overblast.feedback.internal.Look
 import app.overblast.feedback.internal.PrefsConfigStore
 import app.overblast.feedback.internal.PrefsPromptStore
 import app.overblast.feedback.internal.PromptScene
@@ -103,6 +106,7 @@ public object OverblastFeedback {
   private val book = LogBook(trackChanges = true)
   private val logs = LogRecorder(book)
   @Volatile private var collectLogs = true
+  @Volatile private var themeOverride: FeedbackTheme? = null
   @Volatile private var crashWatch: CrashWatch? = null
   private var logcat: LogcatReader? = null
   private val network = NetworkRecorder()
@@ -241,6 +245,16 @@ public object OverblastFeedback {
   @JvmStatic
   public fun setExtra(key: String, value: String?) {
     synchronized(extras) { if (value == null) extras.remove(key) else extras[key] = value }
+  }
+
+  /**
+   * The brand for everything the library draws from now on, in place of [FeedbackOptions.theme]: for
+   * a theme only known later, such as Compose's (`FeedbackTheme.fromMaterialTheme()` in `:compose`),
+   * or one that changes with the app's own setting. Null goes back to the options' theme.
+   */
+  @JvmStatic
+  public fun setTheme(theme: FeedbackTheme?) {
+    themeOverride = theme
   }
 
   /** Turns shake-to-report on or off at runtime, for an app with its own setting for it. */
@@ -432,7 +446,7 @@ public object OverblastFeedback {
     try {
       offerOpen = true
       pill?.dismissSilently()
-      CrashWatch.offer(a, c.options.strings, send = { offerOpen = false; open(a, Trigger.RELAUNCH, previous) }, decline = { offerOpen = false })
+      CrashWatch.offer(a, c.options.strings, Look.of(a, themeNow(c)), send = { offerOpen = false; open(a, Trigger.RELAUNCH, previous) }, decline = { offerOpen = false })
     } catch (e: RuntimeException) {
       offerOpen = false
       Log.w(TAG, "the crash report offer could not be shown", e)
@@ -468,7 +482,7 @@ public object OverblastFeedback {
 
   private fun showPill(c: Config, activity: Activity) {
     val p = ErrorPromptPill(
-      activity, c.options.strings,
+      activity, c.options.strings, Look.of(activity, themeNow(c)),
       onReport = {
         pill = null
         c.prompt.onReported()
@@ -498,6 +512,8 @@ public object OverblastFeedback {
   private fun promptLine(text: String) {
     if (collectLogs) book.add(System.currentTimeMillis(), LogLevel.INFO, text, LogBook.SRC)
   }
+
+  private fun themeNow(c: Config): FeedbackTheme = themeOverride ?: c.options.theme
 
   private fun requireStarted(what: String): Config =
     config ?: throw IllegalStateException("OverblastFeedback.$what: call OverblastFeedback.start(application, key) first")
@@ -558,6 +574,7 @@ public object OverblastFeedback {
     val sheet = FeedbackSheet(
       activity = activity,
       screenshot = shot,
+      look = Look.of(activity, themeNow(c)),
       offerScreenshot = c.keyConfig.config.screenshots,
       categories = c.keyConfig.config.categories,
       initialCategory = c.keyConfig.config.initialCategory(problem = previous != null || context.trigger == Trigger.ERROR_PROMPT.wire),
@@ -597,7 +614,7 @@ public object OverblastFeedback {
     val base = reporter
     val who = if (d.email != null) Reporter(d.email, base?.name, base?.accountRef) else base
     val image = if (d.includeScreenshot) shot else null
-    submit(c, d.message, d.category, who, d.selected, context, image, highlighted = d.selected != null, density = density, previous = previous, back = back)
+    submit(c, d.message, d.category, who, d.selected, context, image, highlighted = d.selected != null, density = density, previous = previous, edits = d.edits, back = back)
   }
 
   private fun submit(
@@ -611,6 +628,7 @@ public object OverblastFeedback {
     highlighted: Boolean,
     density: Float = 1f,
     previous: PreviousSession?,
+    edits: List<ImageEdit> = emptyList(),
     back: (FeedbackResult) -> Unit,
   ) {
     val reporterNow = who ?: reporter
@@ -628,7 +646,9 @@ public object OverblastFeedback {
         }
         val anchor = if (previous != null) previous.crash.at ?: all.lastOrNull()?.let { it.last ?: it.t } ?: openedAt else openedAt
         val image = shot?.let { s ->
-          val d = if (highlighted && selected != null) ScreenCapture.highlighted(s, selected.boundsInWindow, density) else s
+          // The reporter's covers and blurs, then the pick's outline, over the already-blanked capture.
+          val outline = if (highlighted && selected != null) selected.boundsInWindow else null
+          val d = if (outline != null || edits.isNotEmpty()) ImageComposer.compose(s, edits, outline, density) else s
           drawn = d
           ScreenCapture.encodeJpeg(d)?.let { ScreenshotPart("image/jpeg", it, highlighted && selected != null) }
         }

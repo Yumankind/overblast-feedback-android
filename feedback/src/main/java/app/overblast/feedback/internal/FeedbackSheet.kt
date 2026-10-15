@@ -2,71 +2,43 @@ package app.overblast.feedback.internal
 
 import android.app.Activity
 import android.app.Dialog
-import android.content.Context
-import android.content.res.Configuration
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.RectF
-import android.graphics.Typeface
-import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.GradientDrawable
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
 import android.text.TextWatcher
-import android.util.TypedValue
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.view.Window
 import android.view.WindowManager
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
-import android.widget.Toast
 import app.overblast.feedback.Category
 import app.overblast.feedback.FeedbackResult
 import app.overblast.feedback.FeedbackStrings
 
-// THE SHEET. Plain Views and two framework themes, so the library brings no Material or AppCompat into
-// the app. It follows the activity's own night mode, which is what AppCompat's DayNight sets too.
+// THE SHEET. Plain Views, so the library brings no Material or AppCompat into the app; the brand comes
+// from [Look] (the app's accent, typeface and corner radius), and light or dark from the activity.
 //
-// What the reporter controls, and the defaults the contract asks for (§6): the screenshot is OFF until
-// they turn it on, they see it before sending and can remove it, and a line says what will be sent.
-
-internal class Palette(val dark: Boolean) {
-  val sheet = if (dark) Color.rgb(0x1C, 0x1C, 0x1E) else Color.WHITE
-  val field = if (dark) Color.rgb(0x2C, 0x2C, 0x2E) else Color.rgb(0xF2, 0xF2, 0xF5)
-  val text = if (dark) Color.rgb(0xF2, 0xF2, 0xF7) else Color.rgb(0x1C, 0x1C, 0x1E)
-  val secondary = if (dark) Color.rgb(0xA1, 0xA1, 0xA6) else Color.rgb(0x6B, 0x6B, 0x70)
-  val accent = if (dark) Color.rgb(0x5B, 0x8D, 0xFF) else Color.rgb(0x25, 0x63, 0xEB)
-  val onAccent = Color.WHITE
-  val danger = if (dark) Color.rgb(0xFF, 0x6B, 0x6B) else Color.rgb(0xC6, 0x28, 0x28)
-  val highlight = Color.rgb(0xFF, 0x5A, 0x1F)
-}
-
-/**
- * Dark when the activity's THEME is dark, which is not always the system's night mode: an app with a
- * light-only theme on a phone in dark mode is a light app. Android 10 and later themes say which they
- * are (`android:isLightTheme`, which Material, AppCompat and MDC themes all set); before that, and for a
- * theme that does not say, the activity's night mode decides.
- */
-internal fun isDark(activity: Activity): Boolean {
-  if (android.os.Build.VERSION.SDK_INT >= 29) {
-    val tv = TypedValue()
-    if (activity.theme.resolveAttribute(android.R.attr.isLightTheme, tv, true) && tv.type == TypedValue.TYPE_INT_BOOLEAN) {
-      return tv.data == 0
-    }
-  }
-  return (activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-}
+//  - a bottom sheet that opens half way and drags to full height by its handle, and goes full height
+//    when the keyboard comes up; Send sits at its bottom, so it is above the keyboard at all times;
+//  - the categories the key takes at the top (none when it takes one), then a large message field;
+//  - "Point at the problem": the pick comes back as a thumbnail of that part of the screen, with
+//    Change and Remove;
+//  - the screenshot, off until the reporter turns it on (§6): a preview, and an editor to cover or blur
+//    parts of it; the private masks are in its pixels and cannot be taken off;
+//  - after Send, a short "Sent, thank you" in the sheet itself, then it closes; a refusal keeps it open.
 
 internal class SelectedElement(val element: NativeElement, val boundsInWindow: RectF, val summary: String)
 
@@ -76,125 +48,177 @@ internal class SheetDraft(
   val email: String?,
   val selected: SelectedElement?,
   val includeScreenshot: Boolean,
+  /** The covers and blurs drawn on the screenshot, in its pixels, in order. */
+  val edits: List<ImageEdit> = emptyList(),
 )
 
 internal class FeedbackSheet(
   private val activity: Activity,
   private val screenshot: Bitmap?,
   private val strings: FeedbackStrings,
+  private val look: Look,
   private val askEmail: Boolean,
   private val logsIncluded: Boolean,
   /** A report after an unexpected end (§3.4): it carries that session's logs and what ended it. */
   private val afterCrash: Boolean = false,
   /** False when the key has screenshots off (§2.1): the frozen screen is still there to point at, never attached. */
   private val offerScreenshot: Boolean = true,
-  /** The categories the key takes (§2), the first being [initialCategory]'s fallback; with one, no choice is shown. */
+  /** The categories the key takes (§2); with one, no choice is shown. */
   private val categories: List<Category> = Category.values().toList(),
   private val initialCategory: Category = categories.first(),
   private val hitTest: (Float, Float) -> SelectedElement?,
   private val submit: (SheetDraft, (FeedbackResult) -> Unit) -> Unit,
   private val onClosed: () -> Unit,
 ) {
-  private val ctx: Context = activity
-  private val palette = Palette(isDark(activity))
+  private val w = Widgets(activity, look)
+  private val p = look.palette
   private val density = activity.resources.displayMetrics.density
+  private val main = Handler(Looper.getMainLooper())
 
   private var category = initialCategory
   private var selected: SelectedElement? = null
-  private var highlightedCache: Bitmap? = null
+  private var edits: List<ImageEdit> = emptyList()
+  private var includeShot = false
   private var sending = false
+  private var closing = false
 
   private lateinit var dialog: Dialog
+  private lateinit var sheetLayout: SheetLayout
+  private lateinit var sheet: LinearLayout
   private lateinit var message: EditText
-  private lateinit var chips: List<Pair<Category, TextView>>
-  private lateinit var selectedRow: LinearLayout
-  private lateinit var selectedText: TextView
-  private lateinit var screenshotSwitch: Switch
-  private lateinit var thumbRow: LinearLayout
-  private lateinit var thumb: ImageView
+  private var chips: List<Pair<Category, TextView>> = emptyList()
+  private var pickHost: FrameLayout? = null
+  private var shotSwitch: Switch? = null
+  private var shotPreview: ImageView? = null
+  private var shotBlock: LinearLayout? = null
   private var email: EditText? = null
   private lateinit var summary: TextView
   private lateinit var errorText: TextView
   private lateinit var send: TextView
-
-  private fun dp(v: Float): Int = (v * density + 0.5f).toInt()
+  private lateinit var content: View
+  private lateinit var handle: View
 
   fun show() {
-    val theme = if (palette.dark) android.R.style.Theme_Material_Dialog_NoActionBar else android.R.style.Theme_Material_Light_Dialog_NoActionBar
-    dialog = Dialog(activity, theme)
-    dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-    dialog.setContentView(build())
-    dialog.setCanceledOnTouchOutside(true)
+    dialog = Dialog(activity, android.R.style.Theme_Translucent_NoTitleBar)
+    sheetLayout = SheetLayout(activity, look) { close() }
+    sheetLayout.setSheet(build())
+    dialog.setContentView(sheetLayout)
+    dialog.setCancelable(true)
+    dialog.setOnCancelListener { close() }
     dialog.setOnDismissListener { onClosed() }
-    dialog.window?.let { w ->
-      w.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-      w.setGravity(Gravity.BOTTOM)
-      val screenDp = activity.resources.displayMetrics.widthPixels / density
-      w.setLayout(if (screenDp > 640) dp(600f) else ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+    dialog.window?.let { win ->
+      win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+      win.setBackgroundDrawableResource(android.R.color.transparent)
+      win.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+      // The keyboard does not come up by itself: the sheet opens half way, and goes full height when
+      // the reporter taps the message.
       @Suppress("DEPRECATION")
-      w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+      win.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN)
+      if (Build.VERSION.SDK_INT >= 30) {
+        // Deprecated on 35, where edge to edge is the rule anyway; on 30 to 34 it is how to get there.
+        @Suppress("DEPRECATION")
+        win.setDecorFitsSystemWindows(false)
+      } else {
+        @Suppress("DEPRECATION")
+        win.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+      }
+      @Suppress("DEPRECATION")
+      win.statusBarColor = 0
+      @Suppress("DEPRECATION")
+      win.navigationBarColor = 0
     }
+    dialog.setTitle(title())
     dialog.show()
-    message.requestFocus()
+    if (look.animate) {
+      sheetLayout.scrim.alpha = 0f
+      sheetLayout.scrim.animate().alpha(1f).setDuration(200).start()
+      sheet.translationY = activity.resources.displayMetrics.heightPixels * 0.5f
+      sheet.animate().translationY(0f).setDuration(240).start()
+    }
   }
+
+  private fun title(): String = if (categories == listOf(Category.BUG)) strings.titleProblem else strings.title
 
   // ── Layout ──────────────────────────────────────────────────────────────────────────────────
 
   private fun build(): View {
-    val sheet = LinearLayout(ctx).apply {
+    sheet = LinearLayout(activity).apply {
       orientation = LinearLayout.VERTICAL
-      background = GradientDrawable().apply {
-        setColor(palette.sheet)
-        val r = dp(16f).toFloat()
+      background = android.graphics.drawable.GradientDrawable().apply {
+        setColor(p.sheet)
+        val r = w.dp(look.corner).toFloat()
         cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
       }
-      setPadding(dp(20f), dp(12f), dp(20f), dp(16f))
+      isClickable = true // taps on the sheet are the sheet's, never the scrim's
     }
-    sheet.addView(View(ctx).apply {
-      background = GradientDrawable().apply {
-        setColor(palette.secondary)
-        alpha = 90
-        cornerRadius = dp(2f).toFloat()
-      }
-    }, LinearLayout.LayoutParams(dp(36f), dp(4f)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(12f) })
 
-    val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-    val scroll = ScrollView(ctx).apply { isFillViewport = false; addView(body) }
+    // The handle: a 48 dp target, dragged to resize, tapped (or double-tapped by TalkBack) to toggle.
+    handle = FrameLayout(activity).apply {
+      minimumHeight = w.dp(28f)
+      isClickable = true
+      isFocusable = true
+      contentDescription = strings.sheetHandle
+      setOnClickListener { sheetLayout.toggle() }
+      addView(View(activity).apply { background = w.rounded(ColorMath.argb(0x66, ColorMath.r(p.secondary), ColorMath.g(p.secondary), ColorMath.b(p.secondary)), 0.2f) },
+        FrameLayout.LayoutParams(w.dp(40f), w.dp(4f), Gravity.CENTER))
+      accessibilityDelegate = object : View.AccessibilityDelegate() {
+        override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
+          super.onInitializeAccessibilityNodeInfo(host, info)
+          info.addAction(AccessibilityNodeInfo.AccessibilityAction(AccessibilityNodeInfo.ACTION_CLICK, if (sheetLayout.expanded) strings.collapse else strings.expand))
+        }
+      }
+    }
+    sheet.addView(handle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, w.dp(28f)))
+    sheetLayout.dragWith(handle)
+
+    val header = LinearLayout(activity).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding(w.dp(20f), 0, w.dp(20f), w.dp(8f))
+    }
+    header.addView(w.label(title(), 20f, p.text, bold = true).apply {
+      if (Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
+    })
+    // The key's categories, at the top; one category is no choice, so nothing is shown.
+    if (categories.size > 1) {
+      val names = mapOf(
+        Category.BUG to strings.categoryBug,
+        Category.IDEA to strings.categoryIdea,
+        Category.QUESTION to strings.categoryQuestion,
+        Category.OTHER to strings.categoryOther,
+      )
+      val row = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
+      chips = categories.map { c ->
+        val chip = w.chip(names.getValue(c)) { category = c; paintChips() }
+        row.addView(chip, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = w.dp(8f) })
+        c to chip
+      }
+      header.addView(HorizontalScrollView(activity).apply {
+        isHorizontalScrollBarEnabled = false
+        addView(row)
+      }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = w.dp(12f) })
+      paintChips()
+    }
+    sheet.addView(header)
+    // Dragging the header moves the sheet too, as most bottom sheets do.
+    sheetLayout.dragWith(header)
+
+    val body = LinearLayout(activity).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding(w.dp(20f), w.dp(4f), w.dp(20f), w.dp(12f))
+    }
+    val scroll = ScrollView(activity).apply {
+      isFillViewport = true
+      addView(body)
+    }
+    content = scroll
     sheet.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
-    val bugOnly = categories == listOf(Category.BUG)
-    body.addView(label(if (bugOnly) strings.titleProblem else strings.title, 20f, palette.text, bold = true))
-    body.addView(label(strings.subtitle, 14f, palette.secondary).apply { setPadding(0, dp(4f), 0, dp(14f)) })
-
-    // Category
-    val chipRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-    val names = mapOf(
-      Category.BUG to strings.categoryBug,
-      Category.IDEA to strings.categoryIdea,
-      Category.QUESTION to strings.categoryQuestion,
-      Category.OTHER to strings.categoryOther,
-    )
-    chips = categories.map { it to names.getValue(it) }.map { (c, text) ->
-      val chip = label(text, 14f, palette.text).apply {
-        gravity = Gravity.CENTER
-        setPadding(dp(14f), dp(7f), dp(14f), dp(7f))
-        isClickable = true
-        contentDescription = text
-        setOnClickListener { category = c; paintChips() }
-      }
-      chipRow.addView(chip, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(8f) })
-      c to chip
-    }
-    // One category is no choice: nothing to show.
-    if (categories.size > 1) body.addView(HorizontalScroll(ctx, chipRow))
-    paintChips()
-
-    // Message
-    message = field(strings.messageHint, minLines = 4).apply {
+    message = w.field(strings.messageHint, minLines = 5).apply {
       inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
       gravity = Gravity.TOP or Gravity.START
-      maxLines = 8
+      maxLines = 12
       filters = arrayOf(InputFilter.LengthFilter(Limits.MESSAGE))
+      setOnFocusChangeListener { _, has -> if (has) sheetLayout.settle(expand = true) }
       addTextChangedListener(object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
         override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
@@ -203,132 +227,170 @@ internal class FeedbackSheet(
         }
       })
     }
-    body.addView(message, fieldParams(top = 14f))
+    body.addView(message, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-    // Point at the problem
     if (screenshot != null) {
-      body.addView(outlinedButton(strings.pointAtProblem) { openPicker() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12f) })
-      selectedRow = LinearLayout(ctx).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        visibility = View.GONE
-        setPadding(0, dp(8f), 0, 0)
-      }
-      selectedText = label("", 14f, palette.text)
-      selectedRow.addView(selectedText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-      selectedRow.addView(textButton(strings.clear) { selected = null; highlightedCache = null; refresh() })
-      body.addView(selectedRow)
-
-      // Screenshot, off by default
-      val switchRow = LinearLayout(ctx).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        setPadding(0, dp(12f), 0, 0)
-      }
-      switchRow.addView(label(strings.includeScreenshot, 15f, palette.text), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-      screenshotSwitch = Switch(ctx).apply {
-        isChecked = false
-        contentDescription = strings.includeScreenshot
-        setOnCheckedChangeListener { _, _ -> refresh() }
-      }
-      switchRow.addView(screenshotSwitch)
-      if (!offerScreenshot) switchRow.visibility = View.GONE
-      body.addView(switchRow)
-
-      thumbRow = LinearLayout(ctx).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        visibility = View.GONE
-        setPadding(0, dp(8f), 0, 0)
-      }
-      thumb = ImageView(ctx).apply {
-        adjustViewBounds = true
-        scaleType = ImageView.ScaleType.FIT_CENTER
-        background = GradientDrawable().apply { setColor(palette.field); cornerRadius = dp(8f).toFloat() }
-        setPadding(dp(2f), dp(2f), dp(2f), dp(2f))
-        contentDescription = strings.partScreenshot
-        setOnClickListener { openPicker() }
-      }
-      thumbRow.addView(thumb, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(160f)))
-      thumbRow.addView(textButton(strings.removeScreenshot) { screenshotSwitch.isChecked = false }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(12f) })
-      body.addView(thumbRow)
+      pickHost = FrameLayout(activity)
+      body.addView(pickHost, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = w.dp(12f) })
+      if (offerScreenshot) body.addView(buildShotBlock(screenshot))
     }
 
-    // Email, only when the app did not say who this is
     if (askEmail) {
-      email = field(strings.emailHint, minLines = 1).apply {
+      email = w.field(strings.emailHint, minLines = 1).apply {
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
         maxLines = 1
         filters = arrayOf(InputFilter.LengthFilter(Limits.EMAIL))
+        setOnFocusChangeListener { _, has -> if (has) sheetLayout.settle(expand = true) }
       }
-      body.addView(email, fieldParams(top = 14f))
-      body.addView(label(strings.emailHelp, 12f, palette.secondary).apply { setPadding(dp(4f), dp(4f), 0, 0) })
+      body.addView(email, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = w.dp(14f) })
+      body.addView(w.label(strings.emailHelp, 12f, p.secondary).apply { setPadding(w.dp(4f), w.dp(4f), 0, 0) })
     }
 
-    summary = label("", 12f, palette.secondary).apply { setPadding(0, dp(14f), 0, 0) }
+    summary = w.label("", 12f, p.secondary).apply { setPadding(0, w.dp(14f), 0, 0) }
     body.addView(summary)
-    errorText = label("", 14f, palette.danger).apply {
+    errorText = w.label("", 14f, p.danger).apply {
       visibility = View.GONE
-      setPadding(0, dp(10f), 0, 0)
+      setPadding(0, w.dp(10f), 0, 0)
+      accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE
     }
     body.addView(errorText)
 
-    // Buttons, outside the scroll so Send is always reachable
-    val buttons = LinearLayout(ctx).apply {
+    // The bar, at the sheet's bottom, which [SheetLayout] keeps above the keyboard.
+    val bar = LinearLayout(activity).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.END or Gravity.CENTER_VERTICAL
-      setPadding(0, dp(14f), 0, 0)
+      setPadding(w.dp(16f), w.dp(8f), w.dp(16f), w.dp(12f))
+      setBackgroundColor(p.sheet)
     }
-    buttons.addView(textButton(strings.cancel) { if (!sending) dialog.dismiss() })
-    send = filledButton(strings.send) { onSend() }
-    buttons.addView(send, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(8f) })
-    sheet.addView(buttons)
+    bar.addView(w.textButton(strings.cancel) { if (!sending) close() })
+    send = w.filledButton(strings.send) { onSend() }
+    bar.addView(send, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = w.dp(8f) })
+    sheet.addView(View(activity).apply { setBackgroundColor(p.field) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, w.dp(1f).coerceAtLeast(1)))
+    sheet.addView(bar)
 
-    sheet.setOnApplyWindowInsetsListener { v, insets ->
-      v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, dp(16f) + systemBars(insets).second)
-      insets
-    }
     refresh()
     return sheet
   }
 
-  private fun paintChips() {
-    for ((c, chip) in chips) {
-      val on = c == category
-      chip.setTextColor(if (on) palette.onAccent else palette.text)
-      chip.background = GradientDrawable().apply {
-        cornerRadius = dp(16f).toFloat()
-        setColor(if (on) palette.accent else palette.field)
-      }
-      chip.isSelected = on
+  private fun buildShotBlock(shot: Bitmap): View {
+    val block = LinearLayout(activity).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding(0, w.dp(12f), 0, 0)
+    }
+    val row = LinearLayout(activity).apply {
+      orientation = LinearLayout.HORIZONTAL
+      gravity = Gravity.CENTER_VERTICAL
+      minimumHeight = w.dp(48f)
+    }
+    row.addView(w.label(strings.includeScreenshot, 15f), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+    val sw = Switch(activity).apply {
+      isChecked = false
+      contentDescription = strings.includeScreenshot
+      setOnCheckedChangeListener { _, on -> includeShot = on; refresh() }
+    }
+    shotSwitch = sw
+    row.addView(sw)
+    block.addView(row)
+    val detail = LinearLayout(activity).apply {
+      orientation = LinearLayout.VERTICAL
+      visibility = View.GONE
+    }
+    val preview = ImageView(activity).apply {
+      adjustViewBounds = true
+      scaleType = ImageView.ScaleType.FIT_CENTER
+      background = w.rounded(p.field, 0.5f)
+      setPadding(w.dp(2f), w.dp(2f), w.dp(2f), w.dp(2f))
+      contentDescription = "${strings.partScreenshot}. ${strings.editOpen}"
+      isClickable = true
+      setOnClickListener { openEditorNow(shot) }
+    }
+    shotPreview = preview
+    detail.addView(preview, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, w.dp(200f)).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = w.dp(4f) })
+    val actions = LinearLayout(activity).apply {
+      orientation = LinearLayout.HORIZONTAL
+      gravity = Gravity.CENTER_VERTICAL
+    }
+    actions.addView(w.label(strings.editOpen, 13f, p.secondary), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+    actions.addView(w.textButton(strings.editTitle) { openEditorNow(shot) })
+    actions.addView(w.textButton(strings.removeScreenshot) { sw.isChecked = false })
+    detail.addView(actions)
+    shotBlock = detail
+    block.addView(detail)
+    return block
+  }
+
+  private fun openEditorNow(shot: Bitmap) {
+    openEditor(activity, w, strings, shot, selected?.boundsInWindow, edits) { next ->
+      edits = next
+      refresh()
     }
   }
 
+  private fun openPointerNow() {
+    val shot = screenshot ?: return
+    openPointer(activity, w, strings, shot, selected, hitTest) { pick ->
+      selected = pick
+      refresh()
+    }
+  }
+
+  private fun paintChips() {
+    for ((c, chip) in chips) w.paintChip(chip, c == category)
+  }
+
+  /** The pick, as a button to make one or as its thumbnail with Change and Remove. */
+  private fun paintPick() {
+    val host = pickHost ?: return
+    val shot = screenshot ?: return
+    host.removeAllViews()
+    val sel = selected
+    if (sel == null) {
+      host.addView(w.outlinedButton(strings.pointAtProblem) { openPointerNow() }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+      return
+    }
+    val card = LinearLayout(activity).apply {
+      orientation = LinearLayout.HORIZONTAL
+      gravity = Gravity.CENTER_VERTICAL
+      background = w.rounded(p.field, 0.75f)
+      setPadding(w.dp(8f), w.dp(8f), w.dp(4f), w.dp(8f))
+    }
+    val thumb = ImageView(activity).apply {
+      setImageBitmap(ImageComposer.pickThumbnail(shot, sel.boundsInWindow, density))
+      scaleType = ImageView.ScaleType.CENTER_CROP
+      background = w.rounded(p.sheet, 0.4f)
+      clipToOutline = true
+      importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+    card.addView(thumb, LinearLayout.LayoutParams(w.dp(72f), w.dp(72f)))
+    val texts = LinearLayout(activity).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding(w.dp(12f), 0, w.dp(4f), 0)
+    }
+    texts.addView(w.label(strings.selectedPrefix, 12f, p.secondary))
+    texts.addView(w.label(sel.summary, 14f, p.text).apply { maxLines = 2 })
+    card.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+    val buttons = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+    buttons.addView(w.textButton(strings.pickChange) { openPointerNow() })
+    buttons.addView(w.textButton(strings.pickRemove) { selected = null; refresh() })
+    card.addView(buttons)
+    host.addView(card, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+  }
+
   private fun refresh() {
-    if (screenshot != null) {
-      val sel = selected
-      selectedRow.visibility = if (sel != null) View.VISIBLE else View.GONE
-      if (sel != null) selectedText.text = "${strings.selectedPrefix} ${sel.summary}"
-      val on = screenshotSwitch.isChecked
-      thumbRow.visibility = if (on) View.VISIBLE else View.GONE
-      if (on) thumb.setImageBitmap(imageToSend())
+    paintPick()
+    val shot = screenshot
+    if (shot != null && shotBlock != null) {
+      shotBlock?.visibility = if (includeShot) View.VISIBLE else View.GONE
+      if (includeShot) shotPreview?.setImageBitmap(ImageComposer.preview(shot, edits, selected?.boundsInWindow, density, w.dp(400f)))
     }
     val parts = ArrayList<String>()
     parts.add(strings.partMessage)
     if (selected != null) parts.add(strings.partElement)
-    if (screenshot != null && screenshotSwitch.isChecked) parts.add(strings.partScreenshot)
+    if (shot != null && includeShot) parts.add(strings.partScreenshot)
     if (afterCrash) parts.add(strings.partCrash)
     if (logsIncluded) parts.add(if (afterCrash) strings.partLogsPrevious else strings.partLogs)
     parts.add(strings.partDevice)
     summary.text = "${strings.willBeSent} ${parts.joinToString(", ")}."
-  }
-
-  /** The screenshot as it will be sent: with the selected element outlined, when there is one. */
-  private fun imageToSend(): Bitmap? {
-    val shot = screenshot ?: return null
-    val sel = selected ?: return shot
-    highlightedCache?.let { return it }
-    return ScreenCapture.highlighted(shot, sel.boundsInWindow, density).also { highlightedCache = it }
   }
 
   // ── Send ────────────────────────────────────────────────────────────────────────────────────
@@ -357,7 +419,8 @@ internal class FeedbackSheet(
       category = category,
       email = typed,
       selected = selected,
-      includeScreenshot = screenshot != null && screenshotSwitch.isChecked,
+      includeScreenshot = screenshot != null && includeShot,
+      edits = if (includeShot) edits else emptyList(),
     )
     submit(draft) { result -> onResult(result) }
   }
@@ -368,222 +431,60 @@ internal class FeedbackSheet(
     send.isEnabled = true
     send.alpha = 1f
     when (result) {
-      is FeedbackResult.Sent -> {
-        toast(result.notice ?: strings.sent)
-        if (dialog.isShowing) dialog.dismiss()
-      }
-      is FeedbackResult.SavedForLater -> {
-        toast("${result.message} ${strings.savedForLater}")
-        if (dialog.isShowing) dialog.dismiss()
-      }
+      is FeedbackResult.Sent -> confirm(if (result.known) strings.sentKnown else result.notice ?: strings.sentShort, if (result.known || result.notice != null) 2_500L else 1_500L)
+      is FeedbackResult.SavedForLater -> confirm("${result.message} ${strings.savedForLater}", 2_500L)
       is FeedbackResult.Failed -> showError(result.message)
     }
+  }
+
+  /** The confirmation, in the sheet: a check and one line, announced, then the sheet closes by itself. */
+  private fun confirm(text: String, holdMs: Long) {
+    hideKeyboard()
+    val done = LinearLayout(activity).apply {
+      orientation = LinearLayout.VERTICAL
+      gravity = Gravity.CENTER
+      setPadding(w.dp(24f), w.dp(24f), w.dp(24f), w.dp(32f))
+    }
+    done.addView(CheckMark(activity, p.accent, p.onAccent), LinearLayout.LayoutParams(w.dp(56f), w.dp(56f)))
+    val line = w.label(text, 17f, p.text, bold = true).apply {
+      gravity = Gravity.CENTER
+      setPadding(0, w.dp(14f), 0, 0)
+      accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+    }
+    done.addView(line)
+    // The form goes; the handle stays so the sheet still reads as the same sheet.
+    for (i in sheet.childCount - 1 downTo 1) sheet.removeViewAt(i)
+    sheet.addView(done, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+    sheetLayout.settle(expand = false)
+    if (look.animate) {
+      done.alpha = 0f
+      done.animate().alpha(1f).setDuration(160).start()
+    }
+    line.announceForAccessibilityCompat(text)
+    main.postDelayed({ close() }, holdMs)
+  }
+
+  private fun hideKeyboard() {
+    val imm = activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+    imm?.hideSoftInputFromWindow(sheet.windowToken, 0)
   }
 
   private fun showError(text: String) {
     errorText.text = text
     errorText.visibility = View.VISIBLE
+    (content as? ScrollView)?.post { (content as ScrollView).smoothScrollTo(0, errorText.bottom) }
   }
 
-  private fun toast(text: String) {
-    Toast.makeText(activity.applicationContext, text, Toast.LENGTH_LONG).show()
-  }
-
-  // ── Point at the problem ────────────────────────────────────────────────────────────────────
-
-  private fun openPicker() {
-    val shot = screenshot ?: return
-    val picker = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-    val root = FrameLayout(ctx).apply { setBackgroundColor(Color.BLACK) }
-    var pending: SelectedElement? = selected
-    lateinit var use: TextView
-    lateinit var caption: TextView
-    val view = PickerView(ctx, shot, palette.highlight, density).apply {
-      highlight = pending?.boundsInWindow
-      onTap = { x, y ->
-        val hit = hitTest(x, y)
-        if (hit != null) {
-          pending = hit
-          highlight = hit.boundsInWindow
-          caption.text = hit.summary
-          use.isEnabled = true
-          use.alpha = 1f
-          invalidate()
-        }
-      }
+  /** Slides away (or simply goes, with animations off), then dismisses. */
+  private fun close() {
+    if (closing) return
+    closing = true
+    hideKeyboard()
+    if (!look.animate || !dialog.isShowing) {
+      if (dialog.isShowing) dialog.dismiss()
+      return
     }
-    root.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply { bottomMargin = dp(64f); topMargin = dp(40f) })
-    root.addView(label(strings.pointHint, 14f, Color.WHITE).apply {
-      gravity = Gravity.CENTER
-      setPadding(dp(16f), dp(10f), dp(16f), dp(10f))
-    }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40f), Gravity.TOP))
-    val bar = LinearLayout(ctx).apply {
-      orientation = LinearLayout.HORIZONTAL
-      gravity = Gravity.CENTER_VERTICAL
-      setPadding(dp(16f), 0, dp(16f), 0)
-      setBackgroundColor(Color.rgb(0x1C, 0x1C, 0x1E))
-    }
-    caption = label(pending?.summary ?: "", 13f, Color.rgb(0xD1, 0xD1, 0xD6)).apply { maxLines = 2 }
-    bar.addView(caption, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-    bar.addView(textButton(strings.cancel, Color.WHITE) { picker.dismiss() })
-    use = filledButton(strings.pointDone) {
-      selected = pending
-      highlightedCache = null
-      picker.dismiss()
-      refresh()
-    }.apply {
-      isEnabled = pending != null
-      alpha = if (pending != null) 1f else 0.5f
-    }
-    bar.addView(use, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(8f) })
-    root.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64f), Gravity.BOTTOM))
-    // Android 15 draws every window edge to edge, so the status and navigation bars are inset by hand.
-    root.setOnApplyWindowInsetsListener { v, insets ->
-      val (top, bottom) = systemBars(insets)
-      v.setPadding(0, top, 0, bottom)
-      insets
-    }
-    picker.setContentView(root)
-    picker.show()
+    sheetLayout.scrim.animate().alpha(0f).setDuration(180).start()
+    sheet.animate().translationY(sheet.height.toFloat()).setDuration(200).withEndAction { if (dialog.isShowing) dialog.dismiss() }.start()
   }
-
-  @Suppress("DEPRECATION")
-  private fun systemBars(insets: android.view.WindowInsets): Pair<Int, Int> =
-    if (android.os.Build.VERSION.SDK_INT >= 30) {
-      val b = insets.getInsets(android.view.WindowInsets.Type.systemBars())
-      b.top to b.bottom
-    } else {
-      insets.systemWindowInsetTop to insets.systemWindowInsetBottom
-    }
-
-  // ── Small view factories ────────────────────────────────────────────────────────────────────
-
-  private fun label(text: String, sp: Float, color: Int, bold: Boolean = false): TextView = TextView(ctx).apply {
-    this.text = text
-    setTextSize(TypedValue.COMPLEX_UNIT_SP, sp)
-    setTextColor(color)
-    if (bold) typeface = Typeface.DEFAULT_BOLD
-  }
-
-  private fun field(hint: String, minLines: Int): EditText = EditText(ctx).apply {
-    this.hint = hint
-    this.minLines = minLines
-    setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-    setTextColor(palette.text)
-    setHintTextColor(palette.secondary)
-    background = GradientDrawable().apply {
-      setColor(palette.field)
-      cornerRadius = dp(10f).toFloat()
-    }
-    setPadding(dp(12f), dp(10f), dp(12f), dp(10f))
-  }
-
-  private fun fieldParams(top: Float) = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(top) }
-
-  private fun textButton(text: String, color: Int = palette.accent, onClick: () -> Unit): TextView = label(text, 15f, color, bold = true).apply {
-    gravity = Gravity.CENTER
-    setPadding(dp(12f), dp(10f), dp(12f), dp(10f))
-    isClickable = true
-    setOnClickListener { onClick() }
-  }
-
-  private fun filledButton(text: String, onClick: () -> Unit): TextView = label(text, 15f, palette.onAccent, bold = true).apply {
-    gravity = Gravity.CENTER
-    minWidth = dp(88f)
-    setPadding(dp(18f), dp(10f), dp(18f), dp(10f))
-    background = GradientDrawable().apply {
-      setColor(palette.accent)
-      cornerRadius = dp(20f).toFloat()
-    }
-    isClickable = true
-    setOnClickListener { if (isEnabled) onClick() }
-  }
-
-  private fun outlinedButton(text: String, onClick: () -> Unit): TextView = label(text, 15f, palette.accent, bold = true).apply {
-    gravity = Gravity.CENTER
-    setPadding(dp(14f), dp(10f), dp(14f), dp(10f))
-    background = GradientDrawable().apply {
-      setColor(Color.TRANSPARENT)
-      setStroke(dp(1f), palette.accent)
-      cornerRadius = dp(10f).toFloat()
-    }
-    isClickable = true
-    setOnClickListener { onClick() }
-  }
-
-  @Suppress("FunctionName")
-  private fun HorizontalScroll(ctx: Context, child: View): View =
-    android.widget.HorizontalScrollView(ctx).apply {
-      isHorizontalScrollBarEnabled = false
-      addView(child)
-    }
-}
-
-/** The frozen screenshot, fit to the screen; a tap is reported in window pixels, the screenshot's own. */
-internal class PickerView(
-  context: Context,
-  private val bitmap: Bitmap,
-  highlightColor: Int,
-  private val density: Float,
-) : View(context) {
-  var highlight: RectF? = null
-  var onTap: ((Float, Float) -> Unit)? = null
-
-  private val dst = RectF()
-  private val box = RectF()
-  private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-  private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = highlightColor
-    style = Paint.Style.STROKE
-    strokeWidth = 3f * density
-  }
-  private val fill = Paint().apply {
-    color = highlightColor
-    alpha = 0x40
-    style = Paint.Style.FILL
-  }
-
-  private fun layoutBitmap() {
-    val pad = 8f * density
-    val aw = width - 2 * pad
-    val ah = height - 2 * pad
-    if (aw <= 0 || ah <= 0) return
-    val scale = minOf(aw / bitmap.width, ah / bitmap.height)
-    val w = bitmap.width * scale
-    val h = bitmap.height * scale
-    val left = (width - w) / 2f
-    val top = (height - h) / 2f
-    dst.set(left, top, left + w, top + h)
-  }
-
-  override fun onDraw(canvas: Canvas) {
-    super.onDraw(canvas)
-    layoutBitmap()
-    canvas.drawBitmap(bitmap, null, dst, paint)
-    val h = highlight ?: return
-    val sx = dst.width() / bitmap.width
-    val sy = dst.height() / bitmap.height
-    box.set(dst.left + h.left * sx, dst.top + h.top * sy, dst.left + h.right * sx, dst.top + h.bottom * sy)
-    canvas.drawRect(box, fill)
-    canvas.drawRect(box, stroke)
-  }
-
-  override fun onTouchEvent(event: MotionEvent): Boolean {
-    when (event.actionMasked) {
-      MotionEvent.ACTION_DOWN -> return true
-      MotionEvent.ACTION_UP -> {
-        layoutBitmap()
-        if (dst.contains(event.x, event.y) && dst.width() > 0) {
-          val x = (event.x - dst.left) * bitmap.width / dst.width()
-          val y = (event.y - dst.top) * bitmap.height / dst.height()
-          onTap?.invoke(x, y)
-        }
-        performClick()
-        return true
-      }
-    }
-    return super.onTouchEvent(event)
-  }
-
-  override fun performClick(): Boolean = super.performClick()
 }

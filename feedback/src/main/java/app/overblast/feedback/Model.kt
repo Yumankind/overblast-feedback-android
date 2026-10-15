@@ -61,6 +61,8 @@ public sealed class FeedbackResult {
     public val taskId: String?,
     public val conversationId: String?,
     public val notice: String? = null,
+    /** The team already knows about this problem (§3.3): the confirmation says so. Nothing else about it is shown. */
+    public val known: Boolean = false,
   ) : FeedbackResult()
 
   /**

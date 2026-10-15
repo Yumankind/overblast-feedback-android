@@ -49,4 +49,10 @@ class AnswerMapperTest {
     val r = AnswerMapper.map(507, """{"code":"storage_full","error":"Filed without the screenshot: the workspace is out of storage.","taskId":"t1"}""")
     assertEquals(FeedbackResult.Sent(null, "t1", null, "Filed without the screenshot: the workspace is out of storage."), r)
   }
+
+  @Test
+  fun aKnownIssueIsSaidOnTheResult() {
+    assertEquals(FeedbackResult.Sent("fbr_1", "t", null, known = true), AnswerMapper.map(201, """{"id":"fbr_1","taskId":"t","conversationId":null,"known":true}"""))
+    assertEquals(false, (AnswerMapper.map(201, """{"id":"fbr_1","taskId":"t","conversationId":null}""") as FeedbackResult.Sent).known)
+  }
 }

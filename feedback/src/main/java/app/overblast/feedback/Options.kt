@@ -33,6 +33,8 @@ import android.app.Activity
  * @property appHosts the app's own API hosts (`api.example.com`, subdomains included): a request to one
  *   of them answered 5xx, or never answered, counts for the error prompt when the key lists
  *   `server_error` or `network`. Empty means no request counts.
+ * @property theme the brand: accent colour, typeface and corner radius for everything the library
+ *   draws. The default takes the accent from the activity's theme (`colorPrimary`).
  */
 public class FeedbackOptions @JvmOverloads constructor(
   public val shakeToReport: Boolean = true,
@@ -48,6 +50,7 @@ public class FeedbackOptions @JvmOverloads constructor(
   public val offerReportAfterCrash: Boolean = true,
   public val errorPrompt: Boolean = true,
   public val appHosts: List<String> = emptyList(),
+  public val theme: FeedbackTheme = FeedbackTheme(),
 )
 
 /** The sheet's words. Replace any of them; a refusal from the server is shown in the server's own sentence. */
@@ -62,7 +65,7 @@ public data class FeedbackStrings(
   public val categoryQuestion: String = "Question",
   public val categoryOther: String = "Other",
   public val pointAtProblem: String = "Point at the problem",
-  public val pointHint: String = "Tap the part of the screen that's wrong",
+  public val pointHint: String = "Tap the part that's wrong",
   public val pointDone: String = "Use this",
   public val selectedPrefix: String = "Selected:",
   public val clear: String = "Clear",
@@ -91,4 +94,20 @@ public data class FeedbackStrings(
   public val errorPrompt: String = "Something may have gone wrong. Tell us?",
   public val errorPromptReport: String = "Report",
   public val errorPromptClose: String = "Close",
+  public val pointNothing: String = "Nothing selected yet",
+  public val pickChange: String = "Change",
+  public val pickRemove: String = "Remove",
+  public val editTitle: String = "Hide parts",
+  public val editOpen: String = "Cover or blur anything you'd rather not send.",
+  public val editHint: String = "Drag over anything you'd rather not send. Private areas are always hidden.",
+  public val editCover: String = "Cover",
+  public val editBlur: String = "Blur",
+  public val editUndo: String = "Undo",
+  public val editClear: String = "Clear",
+  public val editDone: String = "Done",
+  public val sentShort: String = "Sent, thank you",
+  public val sentKnown: String = "Thanks. We already know about this one and we're on it.",
+  public val sheetHandle: String = "Sheet handle",
+  public val expand: String = "Expand",
+  public val collapse: String = "Collapse",
 )

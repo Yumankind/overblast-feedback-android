@@ -99,7 +99,7 @@ internal class CrashWatch(
 
   companion object {
     /** The small question, on [activity]. [send] opens the report; anything else declines it. */
-    fun offer(activity: Activity, strings: FeedbackStrings, send: () -> Unit, decline: () -> Unit) {
+    fun offer(activity: Activity, strings: FeedbackStrings, look: Look, send: () -> Unit, decline: () -> Unit) {
       var answered = false
       val dialog = AlertDialog.Builder(activity)
         .setMessage(strings.crashOffer)
@@ -114,6 +114,14 @@ internal class CrashWatch(
         .create()
       dialog.setOnDismissListener { if (!answered) decline() }
       dialog.show()
+      // The brand on the platform's own dialog: its buttons in the accent and the typeface.
+      for (which in listOf(android.content.DialogInterface.BUTTON_POSITIVE, android.content.DialogInterface.BUTTON_NEGATIVE)) {
+        dialog.getButton(which)?.let { b ->
+          b.setTextColor(look.palette.accent)
+          look.face(b, which == android.content.DialogInterface.BUTTON_POSITIVE)
+        }
+      }
+      dialog.findViewById<android.widget.TextView>(android.R.id.message)?.let { look.face(it, false) }
     }
   }
 }
