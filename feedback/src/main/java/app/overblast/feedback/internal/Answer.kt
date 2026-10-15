@@ -60,6 +60,8 @@ internal object AnswerMapper {
     "unknown_key", "key_disabled", "origin_not_allowed" -> "Feedback isn't available in this app right now."
     "too_large" -> "This report is too large to send. Try without the screenshot."
     "rate_limited" -> "Too many reports for now. Please try again later."
+    "device_required" -> "This device couldn't be verified, so the report wasn't sent. Please try again later."
+    "unknown_device", "device_signature_invalid" -> "This device couldn't be verified. Please try again."
     "misconfigured" -> "Feedback isn't working right now. Please try again later."
     else -> "The report couldn't be sent (error $status). Please try again later."
   }

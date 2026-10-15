@@ -9,8 +9,8 @@ import android.app.Activity
  *   listened to while one of the app's activities is resumed.
  * @property shakeThresholdG how hard a shake must be, in g. 2.7 ignores walking and a phone set down
  *   on a table; lower it for a gentler shake.
- * @property captureLogcat add the last 500 lines of the app's own logcat (`logcat --pid`) to a report.
- *   Only this process's lines can be read, with no permission.
+ * @property captureLogcat follow the app's own logcat (`logcat --pid`) into the report's logs, through
+ *   the same caps as [OverblastFeedback.log]. Only this process's lines can be read, with no permission.
  * @property sendLogs send logs at all: the lines from [OverblastFeedback.log] and, with
  *   [captureLogcat], logcat's. Off means the report carries no `logs`.
  * @property sendNetwork send the calls recorded with [OverblastFeedback.recordNetwork].
@@ -19,6 +19,20 @@ import android.app.Activity
  *   class name, which says little in a single-activity app; return your current route here instead.
  * @property strings every sentence the sheet shows, for apps that translate their interface.
  * @property onResult called on the main thread after each report from the sheet or [OverblastFeedback.report].
+ * @property deviceVerification register this device with the worker on the first report (hardware key
+ *   attestation, or a proof of work where that is unavailable) and sign every report with its key, so
+ *   the worker's per-device limits count real phones. It only happens when the key's verification in
+ *   the console is `flag` or `require` (it is `off` by default); off here turns it off whatever the
+ *   key says, and a key set to `require` then refuses the reports. See the README's "Device verification".
+ * @property offerReportAfterCrash when the last session ended unexpectedly (a crash, an ANR, the system
+ *   killing the app in the foreground), ask once at the next launch whether to send a report with that
+ *   session's logs and what ended it. Off discards it unasked.
+ * @property errorPrompt allow the small "Something may have gone wrong. Tell us?" prompt after an
+ *   error, when the key in the console has it on (it is off there by default). Off here turns it off
+ *   for this app whatever the key says; on cannot turn on what the key has off.
+ * @property appHosts the app's own API hosts (`api.example.com`, subdomains included): a request to one
+ *   of them answered 5xx, or never answered, counts for the error prompt when the key lists
+ *   `server_error` or `network`. Empty means no request counts.
  */
 public class FeedbackOptions @JvmOverloads constructor(
   public val shakeToReport: Boolean = true,
@@ -30,6 +44,10 @@ public class FeedbackOptions @JvmOverloads constructor(
   public val screenName: ((Activity) -> String?)? = null,
   public val strings: FeedbackStrings = FeedbackStrings(),
   public val onResult: ((FeedbackResult) -> Unit)? = null,
+  public val deviceVerification: Boolean = true,
+  public val offerReportAfterCrash: Boolean = true,
+  public val errorPrompt: Boolean = true,
+  public val appHosts: List<String> = emptyList(),
 )
 
 /** The sheet's words. Replace any of them; a refusal from the server is shown in the server's own sentence. */
@@ -55,6 +73,8 @@ public data class FeedbackStrings(
   public val partElement: String = "the selected element",
   public val partScreenshot: String = "the screenshot",
   public val partLogs: String = "logs from this session",
+  public val partLogsPrevious: String = "logs from the last session",
+  public val partCrash: String = "how the app closed",
   public val partDevice: String = "app and device details",
   public val cancel: String = "Cancel",
   public val send: String = "Send",
@@ -63,4 +83,10 @@ public data class FeedbackStrings(
   public val invalidEmail: String = "That email address doesn't look right.",
   public val sent: String = "Thanks, your report was sent.",
   public val savedForLater: String = "Saved on this device. It will be sent later.",
+  public val crashOffer: String = "The app closed unexpectedly. Send a report?",
+  public val crashOfferSend: String = "Send report",
+  public val crashOfferDecline: String = "Not now",
+  public val errorPrompt: String = "Something may have gone wrong. Tell us?",
+  public val errorPromptReport: String = "Report",
+  public val errorPromptClose: String = "Close",
 )

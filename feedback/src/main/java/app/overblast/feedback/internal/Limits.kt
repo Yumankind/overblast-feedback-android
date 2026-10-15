@@ -36,6 +36,21 @@ internal object Limits {
   // under 256,000 so neither reading of "KB" refuses it.
   const val LOG_BYTES = 250_000
 
+  const val CRASH_MESSAGE = 2000
+  const val CRASH_STACK = 16000
+
+  // §3.5. The in-memory buffer, the intake caps, the disk copy, the excerpt window and the log file.
+  const val BUFFER_LINES = 20_000
+  const val BUFFER_BYTES = 2_000_000L
+  const val INTAKE_PER_SECOND = 50
+  const val INTAKE_URGENT_PER_SECOND = 200
+  const val DISK_BYTES = 4_000_000L
+  const val EXCERPT_WINDOW_MS = 120_000L
+  // "At most 4 MB as sent": 4,000,000 bytes of gzip, decoded (the contract's sizes are decimal decoded bytes).
+  const val LOG_FILE_GZIP_BYTES = 4_000_000
+  // "The body is at most 8 MB": 8,000,000 bytes, less a margin for the JSON around the two big fields.
+  const val BODY_BYTES = 7_950_000
+
   const val NETWORK_ENTRIES = 100
   const val NETWORK_URL = 500
   const val NETWORK_METHOD = 16

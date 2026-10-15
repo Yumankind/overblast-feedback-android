@@ -11,7 +11,8 @@ import app.overblast.feedback.NativeHit
 import app.overblast.feedback.NativeHitTester
 
 /**
- * Tap-to-select inside Compose: the deepest semantics node under the tap, from the unmerged semantics
+ * Tap-to-select inside Compose: the deepest semantics node under the tap that has a test tag, a
+ * content description or text (else the deepest node at all), from the unmerged semantics
  * tree of the `AndroidComposeView` the View walk landed on. `OverblastFeedback` installs it by itself
  * when this module is on the classpath.
  *
@@ -27,6 +28,9 @@ public object ComposeHitTester : NativeHitTester {
     val steps = ArrayList<String>()
     var node: SemanticsNode = root
     var found: SemanticsNode? = null
+    var foundSteps = 0
+    var said: SemanticsNode? = null
+    var saidSteps = 0
     var depth = 0
     while (depth++ < MAX_DEPTH) {
       // Later children are drawn on top.
@@ -36,11 +40,19 @@ public object ComposeHitTester : NativeHitTester {
       } ?: break
       steps.add(typeOf(next))
       found = next
+      foundSteps = steps.size
+      if (says(next)) {
+        said = next
+        saidSteps = steps.size
+      }
       node = next
     }
-    val hit = found ?: return null
+    // The deepest node that says something (a test tag, a description, text) rather than the deepest
+    // node: below a tagged card there is usually only anonymous layout, and the tag is what names it.
+    val hit = said ?: found ?: return null
+    val taken = steps.take(if (said != null) saidSteps else foundSteps)
     // Keep the path to the nodes that say something: a deep Compose tree is mostly anonymous layout.
-    val path = steps.filter { it != "Node" }.ifEmpty { listOf(typeOf(hit)) }
+    val path = taken.filter { it != "Node" }.ifEmpty { listOf(typeOf(hit)) }
     val b = hit.boundsInWindow
     return NativeHit(
       path = path,
@@ -50,6 +62,9 @@ public object ComposeHitTester : NativeHitTester {
       boundsInWindow = RectF(b.left, b.top, b.right, b.bottom),
     )
   }
+
+  private fun says(n: SemanticsNode): Boolean =
+    n.config.getOrNull(SemanticsProperties.TestTag) != null || labelOf(n) != null
 
   private fun typeOf(n: SemanticsNode): String {
     val c = n.config

@@ -20,6 +20,23 @@ public enum class LogLevel(public val wire: String) {
 }
 
 /**
+ * How well the worker knows this device (contract §8.1), which sets how many reports it may file.
+ *
+ * - [ATTESTED]: the report key lives in secure hardware, and Google's certificate chain names this app
+ *   and its signing certificate, which the feedback key in the console lists.
+ * - [REGISTERED]: the device holds a registered key, proved by a proof of work, or by an attestation
+ *   that did not meet everything above (an emulator, an unlocked bootloader, an app or signing
+ *   certificate the key does not list).
+ * - [NONE]: reports go unsigned: device verification is off, or registration failed (it is tried
+ *   again with a later report).
+ */
+public enum class DeviceLevel(public val wire: String) {
+  ATTESTED("attested"),
+  REGISTERED("registered"),
+  NONE("none"),
+}
+
+/**
  * The person reporting, as the integrating app knows them. Every field is optional.
  *
  * [email] is the one with a consequence: when it is present the worker opens an email conversation on

@@ -23,17 +23,15 @@ internal class RingBuffer<T>(private val capacity: Int) {
   val size: Int get() = items.size
 }
 
-/** The library's own log lines, from `OverblastFeedback.log`: redacted and cut as they arrive. */
-internal class LogRecorder(capacity: Int = Limits.LOG_ENTRIES, private val clock: () -> Long = System::currentTimeMillis) {
-  private val ring = RingBuffer<LogEntry>(capacity)
-
+/** The app's own log lines, from `OverblastFeedback.log`, into the shared intake (§3.5) as `src: "app"`. */
+internal class LogRecorder(val book: LogBook = LogBook(), private val clock: () -> Long = System::currentTimeMillis) {
   fun log(level: LogLevel, message: String, src: String = "app") {
-    ring.add(LogEntry(clock(), level, Limits.clip(Redactor.redact(message), Limits.LOG_MSG), src))
+    book.add(clock(), level, message, src)
   }
 
-  fun snapshot(): List<LogEntry> = ring.snapshot()
+  fun snapshot(): List<LogEntry> = book.snapshot()
 
-  fun clear() = ring.clear()
+  fun clear() = book.clear()
 }
 
 /** The network calls the app told us about: method, URL without its query, status, time. No bodies, no headers. */

@@ -34,13 +34,13 @@ class BuffersTest {
   }
 
   @Test
-  fun logRecorderKeepsFiveHundredRedactedLines() {
+  fun logRecorderFeedsTheIntakeAsApp() {
     var now = 0L
-    val logs = LogRecorder(clock = { now++ })
-    repeat(600) { logs.log(LogLevel.INFO, "Bearer abcdefghijkl $it") }
+    val logs = LogRecorder(clock = { now += 1000; now })
+    repeat(3) { logs.log(LogLevel.INFO, "Bearer abcdefghijkl $it") }
     val s = logs.snapshot()
-    assertEquals(500, s.size)
-    assertEquals("Bearer [redacted] 599", s.last().msg)
+    assertEquals(3, s.size)
+    assertEquals("Bearer [redacted] 2", s.last().msg)
     assertEquals("app", s.last().src)
   }
 

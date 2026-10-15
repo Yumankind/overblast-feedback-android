@@ -211,4 +211,42 @@ class PayloadEncoderTest {
   fun reporterWithNothingIsLeftOut() {
     assertNull(parse(FeedbackPayload(message = "x", reporter = Reporter()))["reporter"])
   }
+
+  @Suppress("UNCHECKED_CAST")
+  @Test
+  fun relaunchReportsCarryTheTriggerTheCrashAndTheLogFile() {
+    val gz = byteArrayOf(0x1f, 0x8b.toByte(), 8)
+    val p = full().copy(
+      context = full().context.copy(openedAt = 1760440000000, trigger = "relaunch"),
+      crash = CrashInfo("exception", 1760439990000, "java.lang.IllegalStateException: token=abc", "at a.b(C.kt:1)\nBearer abcdefghijkl", "handler"),
+      logFile = LogFilePart(gz, 18240, 1760439400000, 1760440000000),
+      logs = listOf(LogEntry(1, LogLevel.WARN, "retry", "app", repeat = 37, last = 9)),
+    )
+    val m = parse(p)
+    assertEquals(listOf("v", "message", "category", "reporter", "context", "crash", "element", "screenshot", "logs", "logFile", "network"), m.keys.toList())
+    val ctx = m["context"] as Map<String, Any?>
+    assertEquals(1760440000000.0, ctx["openedAt"])
+    assertEquals("relaunch", ctx["trigger"])
+    val crash = m["crash"] as Map<String, Any?>
+    assertEquals(listOf("kind", "at", "message", "stack", "source"), crash.keys.toList())
+    assertEquals("java.lang.IllegalStateException: token=[redacted]", crash["message"])
+    assertEquals("at a.b(C.kt:1)\nBearer [redacted]", crash["stack"])
+    assertEquals("handler", crash["source"])
+    val file = m["logFile"] as Map<String, Any?>
+    assertEquals(listOf("contentType", "encoding", "base64", "lines", "from", "to"), file.keys.toList())
+    assertEquals("application/x-ndjson", file["contentType"])
+    assertEquals("gzip", file["encoding"])
+    assertEquals(Base64Codec.encode(gz), file["base64"])
+    assertEquals(18240.0, file["lines"])
+    val log = (m["logs"] as List<Map<String, Any?>>).single()
+    assertEquals(listOf("t", "level", "msg", "src", "repeat", "last"), log.keys.toList())
+    assertEquals(37.0, log["repeat"])
+  }
+
+  @Suppress("UNCHECKED_CAST")
+  @Test
+  fun aCrashKnownOnlyByItsMarkerHasJustKindAndSource() {
+    val m = parse(full().copy(crash = CrashInfo("unknown", null, null, null, "marker")))
+    assertEquals(mapOf("kind" to "unknown", "source" to "marker"), m["crash"])
+  }
 }

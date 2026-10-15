@@ -84,6 +84,10 @@ internal class FeedbackSheet(
   private val strings: FeedbackStrings,
   private val askEmail: Boolean,
   private val logsIncluded: Boolean,
+  /** A report after an unexpected end (§3.4): it carries that session's logs and what ended it. */
+  private val afterCrash: Boolean = false,
+  /** False when the key has screenshots off (§2.1): the frozen screen is still there to point at, never attached. */
+  private val offerScreenshot: Boolean = true,
   private val hitTest: (Float, Float) -> SelectedElement?,
   private val submit: (SheetDraft, (FeedbackResult) -> Unit) -> Unit,
   private val onClosed: () -> Unit,
@@ -222,6 +226,7 @@ internal class FeedbackSheet(
         setOnCheckedChangeListener { _, _ -> refresh() }
       }
       switchRow.addView(screenshotSwitch)
+      if (!offerScreenshot) switchRow.visibility = View.GONE
       body.addView(switchRow)
 
       thumbRow = LinearLayout(ctx).apply {
@@ -306,7 +311,8 @@ internal class FeedbackSheet(
     parts.add(strings.partMessage)
     if (selected != null) parts.add(strings.partElement)
     if (screenshot != null && screenshotSwitch.isChecked) parts.add(strings.partScreenshot)
-    if (logsIncluded) parts.add(strings.partLogs)
+    if (afterCrash) parts.add(strings.partCrash)
+    if (logsIncluded) parts.add(if (afterCrash) strings.partLogsPrevious else strings.partLogs)
     parts.add(strings.partDevice)
     summary.text = "${strings.willBeSent} ${parts.joinToString(", ")}."
   }

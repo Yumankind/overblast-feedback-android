@@ -15,8 +15,10 @@ import app.overblast.feedback.NativeHitTester
 // hierarchy under the sheet (the screen has not moved: the sheet is a dialog over it). The deepest
 // visible view containing the point wins, and its path is the simple class names from the decor view.
 //
-// A Compose screen is one view (AndroidComposeView) that draws everything itself, so the walk ends
-// there. Inside it, in order:
+// A Compose screen is one view (AndroidComposeView) that draws everything itself. Which of the views
+// and semantics nodes under the finger is the answer is [HitDecision]'s, so a Compose button over a
+// hosted AndroidView (a map) wins over the full-screen AndroidViewsHandler the View walk ends in.
+// Inside a Compose host, the semantics come from, in order:
 //   1. a registered NativeHitTester, which is what the `:compose` module installs: it walks the
 //      semantics tree, the reliable way;
 //   2. otherwise the view's AccessibilityNodeProvider, best effort. A provider hands out the root
@@ -31,17 +33,49 @@ internal object ViewHitTester {
   fun hitTest(root: View, x: Float, y: Float, testers: List<NativeHitTester>): HitResult? {
     val chain = ArrayList<View>()
     if (!deepest(root, x, y, chain)) return null
-    val view = chain.last()
-    val path = chain.map { simpleName(it) }
+    val names = chain.map { simpleName(it) }
+    val steps = chain.map { ViewStep(simpleName(it), kindOf(it), resourceName(it), label(it)) }
+    val cache = HashMap<Int, NativeHit?>()
+    val semanticsAt = { i: Int ->
+      cache.getOrPut(i) { semantics(chain[i], x, y, testers, deepest = i == chain.lastIndex || steps[i].kind == ViewKind.COMPOSE_HOST) }
+    }
+    return when (val pick = HitDecision.decide(steps, semanticsAt) { it.id != null || it.label != null }) {
+      null -> null
+      is HitPick.Semantic -> {
+        val hit = pick.hit
+        HitResult(names.take(pick.hostIndex + 1) + hit.path, hit.type, hit.id, hit.label, RectF(hit.boundsInWindow))
+      }
+      is HitPick.View -> {
+        val view = chain[pick.index]
+        HitResult(names.take(pick.index + 1), simpleName(view), resourceName(view), label(view), boundsInWindow(view))
+      }
+    }
+  }
+
+  /** The node under the finger inside [view]: a tester's, then (for a Compose host or the deepest view) the accessibility provider's. */
+  private fun semantics(view: View, x: Float, y: Float, testers: List<NativeHitTester>, deepest: Boolean): NativeHit? {
     for (t in testers) {
-      val hit = runCatching { t.hitTest(view, x, y) }.getOrNull() ?: continue
-      return HitResult(path + hit.path, hit.type, hit.id, hit.label, RectF(hit.boundsInWindow))
+      runCatching { t.hitTest(view, x, y) }.getOrNull()?.let { return it }
     }
-    if (view.accessibilityNodeProvider != null) {
-      val hit = runCatching { accessibilityHit(view, x, y) }.getOrNull()
-      if (hit != null) return HitResult(path + hit.path, hit.type, hit.id, hit.label, hit.boundsInWindow)
+    if (deepest && view.accessibilityNodeProvider != null) {
+      return runCatching { accessibilityHit(view, x, y) }.getOrNull()
     }
-    return HitResult(path, simpleName(view), resourceName(view), label(view), boundsInWindow(view))
+    return null
+  }
+
+  /** Compose's host view, the wrappers it puts round every AndroidView, or anything else; by class name, so this module needs no Compose. */
+  fun kindOf(view: View): ViewKind {
+    var cls: Class<*>? = view.javaClass
+    while (cls != null && cls != View::class.java) {
+      when (cls.name) {
+        "androidx.compose.ui.platform.AndroidComposeView" -> return ViewKind.COMPOSE_HOST
+        "androidx.compose.ui.platform.AndroidViewsHandler",
+        "androidx.compose.ui.viewinterop.AndroidViewHolder",
+        -> return ViewKind.WRAPPER
+      }
+      cls = cls.superclass
+    }
+    return ViewKind.PLAIN
   }
 
   /** Fills [chain] with the views from [view] down to the deepest one at (x, y). */
@@ -110,6 +144,9 @@ internal object ViewHitTester {
     host.rootView.getLocationOnScreen(origin)
     val steps = ArrayList<String>()
     var best: AccessibilityNodeInfo? = null
+    var bestSteps = 0
+    var said: AccessibilityNodeInfo? = null
+    var saidSteps = 0
     var node: AccessibilityNodeInfo? = root
     var visited = 0
     val method = getChildId ?: return null
@@ -133,22 +170,33 @@ internal object ViewHitTester {
       if (next == null) break
       steps.add(nodeType(next))
       best = next
+      bestSteps = steps.size
+      if (says(next)) {
+        said = next
+        saidSteps = steps.size
+      }
       node = next
     }
-    val found = best ?: return null
+    // The deepest node that says something (a resource id, a description, text), else the deepest one.
+    val found = said ?: best ?: return null
+    val pathSteps = steps.take(if (said != null) saidSteps else bestSteps)
     val r = Rect()
     found.getBoundsInScreen(r)
     r.offset(-origin[0], -origin[1])
     val label = found.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }
       ?: if (found.isPassword || found.isEditable) null else found.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
     return NativeHit(
-      path = steps,
+      path = pathSteps,
       type = nodeType(found),
       id = found.viewIdResourceName,
       label = label,
       boundsInWindow = RectF(r),
     )
   }
+
+  private fun says(n: AccessibilityNodeInfo): Boolean =
+    !n.viewIdResourceName.isNullOrEmpty() || !n.contentDescription.isNullOrBlank() ||
+      (!n.isPassword && !n.isEditable && !n.text.isNullOrBlank())
 
   private fun nodeType(n: AccessibilityNodeInfo): String {
     val cls = n.className?.toString().orEmpty()

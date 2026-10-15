@@ -158,7 +158,7 @@ internal object ScreenCapture {
   }
 
   /** JPEG, long side at most 2400 px, under 5 MB: quality steps down first, then the size. */
-  fun encodeJpeg(source: Bitmap): ByteArray? {
+  fun encodeJpeg(source: Bitmap, targetBytes: Int = TARGET_BYTES): ByteArray? {
     var bitmap = scaleToFit(source, MAX_SIDE)
     try {
       var quality = 80
@@ -166,7 +166,7 @@ internal object ScreenCapture {
         val out = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
         val bytes = out.toByteArray()
-        if (bytes.size <= TARGET_BYTES) return bytes
+        if (bytes.size <= targetBytes) return bytes
         if (quality > 50) {
           quality -= 10
         } else {

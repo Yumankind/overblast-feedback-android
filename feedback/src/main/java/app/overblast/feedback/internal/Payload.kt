@@ -38,6 +38,10 @@ internal data class FeedbackContext(
   val sdkVersion: String = "0.0.0",
   val deviceId: String? = null,
   val extra: Map<String, String> = emptyMap(),
+  /** Unix ms the reporter opened the report: the sheet appearing, or `report()` being called (§3.4). */
+  val openedAt: Long? = null,
+  /** `shake`, `button`, `api` or `relaunch` (§3.1). */
+  val trigger: String? = null,
 ) {
   companion object {
     const val PLATFORM = "android"
@@ -52,7 +56,30 @@ internal data class ScreenshotPart(val contentType: String, val bytes: ByteArray
   override fun hashCode(): Int = (contentType.hashCode() * 31 + bytes.contentHashCode()) * 31 + highlighted.hashCode()
 }
 
-internal data class LogEntry(val t: Long, val level: LogLevel, val msg: String, val src: String?)
+/**
+ * One log line. [repeat] is how many times the line occurred in a row when it was collapsed (§3.5),
+ * 0 or 1 meaning once, and [last] the time of its last repeat.
+ */
+internal data class LogEntry(
+  val t: Long,
+  val level: LogLevel,
+  val msg: String,
+  val src: String?,
+  val repeat: Int = 0,
+  val last: Long? = null,
+)
+
+/** The previous session's unexpected end (§3.4). */
+internal data class CrashInfo(
+  val kind: String,
+  val at: Long?,
+  val message: String?,
+  val stack: String?,
+  val source: String,
+)
+
+/** `logFile` (§3.5): gzip-compressed NDJSON, oldest first. */
+internal class LogFilePart(val gzip: ByteArray, val lines: Int, val from: Long, val to: Long)
 
 internal data class NetworkEntry(val t: Long, val method: String, val url: String, val status: Int, val ms: Long)
 
@@ -65,6 +92,8 @@ internal data class FeedbackPayload(
   val screenshot: ScreenshotPart? = null,
   val logs: List<LogEntry> = emptyList(),
   val network: List<NetworkEntry> = emptyList(),
+  val crash: CrashInfo? = null,
+  val logFile: LogFilePart? = null,
 )
 
 /** A field the library refuses before sending, in the worker's own shape: `invalid_field` or `too_large`. */
@@ -86,9 +115,11 @@ internal object PayloadEncoder {
     out["category"] = p.category.wire
     out["reporter"] = reporter(p.reporter)
     out["context"] = context(p.context)
+    out["crash"] = p.crash?.let { crash(it) }
     out["element"] = p.element?.let { element(it) }
     out["screenshot"] = p.screenshot?.let { screenshot(it) }
     out["logs"] = logs(p.logs).takeIf { it.isNotEmpty() }
+    out["logFile"] = p.logFile?.let { logFile(it) }
     out["network"] = network(p.network).takeIf { it.isNotEmpty() }
     return out
   }
@@ -129,8 +160,27 @@ internal object PayloadEncoder {
       "sdk" to linkedMapOf("name" to c.sdkName, "version" to c.sdkVersion),
       "deviceId" to Limits.deviceId(c.deviceId),
       "extra" to extra.takeIf { it.isNotEmpty() },
+      "openedAt" to c.openedAt?.coerceAtLeast(0),
+      "trigger" to c.trigger,
     )
   }
+
+  private fun crash(c: CrashInfo): Map<String, Any?> = linkedMapOf(
+    "kind" to c.kind,
+    "at" to c.at?.takeIf { it > 0 },
+    "message" to c.message?.let { Limits.opt(Redactor.redact(it), Limits.CRASH_MESSAGE) },
+    "stack" to c.stack?.let { Limits.opt(Redactor.redact(it), Limits.CRASH_STACK) },
+    "source" to c.source,
+  )
+
+  private fun logFile(f: LogFilePart): Map<String, Any?> = linkedMapOf(
+    "contentType" to "application/x-ndjson",
+    "encoding" to "gzip",
+    "base64" to Base64Codec.encode(f.gzip),
+    "lines" to f.lines,
+    "from" to f.from,
+    "to" to f.to,
+  )
 
   fun element(e: NativeElement): Map<String, Any?> {
     val steps = e.path.mapNotNull { Limits.opt(it, Limits.PATH_STEP) }
@@ -161,12 +211,17 @@ internal object PayloadEncoder {
     )
   }
 
-  private fun logEntry(l: LogEntry): Map<String, Any?> = linkedMapOf(
+  fun logEntry(l: LogEntry): Map<String, Any?> = linkedMapOf(
     "t" to l.t,
     "level" to l.level.wire,
     "msg" to Limits.clip(l.msg, Limits.LOG_MSG),
     "src" to Limits.opt(l.src, Limits.LOG_SRC),
+    "repeat" to l.repeat.takeIf { it > 1 },
+    "last" to l.last.takeIf { l.repeat > 1 },
   )
+
+  /** The UTF-8 size of one entry in the `logs` array, its comma included. */
+  fun logEntryBytes(l: LogEntry): Int = Json.encode(logEntry(l)).toByteArray(Charsets.UTF_8).size + 1
 
   /** The newest entries that fit both caps: at most 500, and at most [Limits.LOG_BYTES] encoded. */
   fun logs(all: List<LogEntry>): List<Map<String, Any?>> {
