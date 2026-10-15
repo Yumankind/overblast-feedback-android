@@ -69,6 +69,7 @@ when the door cannot be reached. Before it has ever had an answer it uses the de
 | Device verification | `off` | `flag` or `require` turns on Device verification, below |
 | Screenshots | on | off removes the "Include screenshot" switch (Point at the problem stays) |
 | Error prompt | off | on allows the prompt in The error prompt, below |
+| Categories | all four | the kinds the sheet offers, the first as its default; with only Bug the sheet has no choice and is titled "Report a problem", and `report()` with another category returns `Failed(403, "category_not_accepted")` unsent |
 
 Your options can only turn these **off** for your app (`deviceVerification = false`,
 `errorPrompt = false`); they cannot turn on what the key has off.

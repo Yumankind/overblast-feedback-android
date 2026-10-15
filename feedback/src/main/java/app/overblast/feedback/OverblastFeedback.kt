@@ -360,6 +360,14 @@ public object OverblastFeedback {
     done: ((FeedbackResult) -> Unit)? = null,
   ) {
     val c = requireStarted("report")
+    // A category the key does not take is refused here, unsent, in the worker's own words (§2).
+    c.keyConfig.config.refusal(category)?.let { refused ->
+      onMain {
+        done?.invoke(refused)
+        c.options.onResult?.invoke(refused)
+      }
+      return
+    }
     val openedAt = System.currentTimeMillis()
     if (c.keyConfig.config.registersDevices) c.device?.prepare()
     onMain {
@@ -551,6 +559,8 @@ public object OverblastFeedback {
       activity = activity,
       screenshot = shot,
       offerScreenshot = c.keyConfig.config.screenshots,
+      categories = c.keyConfig.config.categories,
+      initialCategory = c.keyConfig.config.initialCategory(problem = previous != null || context.trigger == Trigger.ERROR_PROMPT.wire),
       strings = c.options.strings,
       askEmail = reporter?.email == null,
       logsIncluded = c.options.sendLogs && (previous == null || previous.logs.isNotEmpty()),

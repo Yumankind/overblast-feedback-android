@@ -1,5 +1,6 @@
 package app.overblast.feedback.internal
 
+import app.overblast.feedback.Category
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -99,5 +100,49 @@ class KeyConfigTest {
     val client = KeyConfigClient("https://x/v1/feedback", "k", FakeGetter(HttpAnswer(401, """{"code":"unknown_key"}"""), HttpAnswer(200, "nope")), store, "ua")
     assertTrue(client.refresh(force = true).registersDevices)
     assertTrue(client.refresh(force = true).registersDevices)
+  }
+
+  // ── Categories ───────────────────────────────────────────────────────────────────────────────
+
+  @Test
+  fun allFourCategoriesByDefaultInTheirOrder() {
+    val c = KeyConfig()
+    assertEquals(listOf(Category.BUG, Category.IDEA, Category.QUESTION, Category.OTHER), c.categories)
+    assertFalse(c.singleCategory)
+    assertEquals(c.categories, KeyConfig.parse("""{"verification":"off"}""")!!.categories)
+  }
+
+  @Test
+  fun theKeysCategoriesInItsOrderUnknownOnesIgnored() {
+    val c = KeyConfig.parse("""{"categories":["question","idea","praise","idea"]}""")!!
+    assertEquals(listOf(Category.QUESTION, Category.IDEA), c.categories)
+    assertEquals(Category.QUESTION, c.initialCategory(problem = false))
+    // A problem report starts as a bug only when the key takes bugs.
+    assertEquals(Category.QUESTION, c.initialCategory(problem = true))
+    assertEquals(Category.BUG, KeyConfig.parse("""{"categories":["idea","bug"]}""")!!.initialCategory(problem = true))
+    assertEquals(Category.IDEA, KeyConfig.parse("""{"categories":["idea","bug"]}""")!!.initialCategory(problem = false))
+    // Nothing usable is the default, never an empty list.
+    assertEquals(4, KeyConfig.parse("""{"categories":[]}""")!!.categories.size)
+    assertEquals(4, KeyConfig.parse("""{"categories":["praise"]}""")!!.categories.size)
+  }
+
+  @Test
+  fun bugOnlyRefusesEverythingElseInItsOwnWords() {
+    val c = KeyConfig.parse("""{"categories":["bug"]}""")!!
+    assertTrue(c.singleCategory)
+    assertNull(c.refusal(Category.BUG))
+    val r = c.refusal(Category.IDEA)!!
+    assertEquals(403, r.status)
+    assertEquals("category_not_accepted", r.code)
+    assertEquals("This app only takes problem reports.", r.message)
+    assertEquals("This app doesn't take this kind of report.", KeyConfig.parse("""{"categories":["bug","idea"]}""")!!.refusal(Category.OTHER)!!.message)
+    assertNull(KeyConfig().refusal(Category.OTHER))
+  }
+
+  @Test
+  fun theWorkersRefusalReadsTheSameWithoutASentence() {
+    val r = AnswerMapper.map(403, """{"code":"category_not_accepted"}""") as app.overblast.feedback.FeedbackResult.Failed
+    assertEquals("category_not_accepted", r.code)
+    assertEquals("This app doesn't take this kind of report.", r.message)
   }
 }

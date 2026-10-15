@@ -1,5 +1,7 @@
 package app.overblast.feedback.internal
 
+import app.overblast.feedback.Category
+import app.overblast.feedback.FeedbackResult
 import java.io.IOException
 
 // WHAT THE KEY SAYS (contract §2.1): `GET <endpoint>/config`, read at start and at most every five
@@ -23,7 +25,26 @@ internal data class KeyConfig(
   val verification: String = VERIFICATION_OFF,
   val errorPrompt: ErrorPromptConfig = ErrorPromptConfig(),
   val screenshots: Boolean = true,
+  /** The kinds of report the key takes, in the console's order; the first is the sheet's default (§2). */
+  val categories: List<Category> = Category.values().toList(),
 ) {
+  /** One category only: the sheet shows no choice. `[bug]` makes it "Report a problem". */
+  val singleCategory: Boolean get() = categories.size == 1
+
+  /**
+   * The sheet's first category: the key's first, except that a report about something going wrong
+   * (after a crash, from the error prompt) starts as a bug whenever the key takes bugs.
+   */
+  fun initialCategory(problem: Boolean): Category =
+    if (problem && Category.BUG in categories) Category.BUG else categories.first()
+
+  /** Null when [category] is one the key takes; otherwise the refusal `report()` returns without sending. */
+  fun refusal(category: Category): FeedbackResult.Failed? {
+    if (category in categories) return null
+    val sentence = if (categories == listOf(Category.BUG)) "This app only takes problem reports." else "This app doesn't take this kind of report."
+    return FeedbackResult.Failed(403, "category_not_accepted", sentence)
+  }
+
   /** Whether the libraries register devices at all (§8): `flag` and `require` do, `off` does not. */
   val registersDevices: Boolean get() = verification == "flag" || verification == "require"
 
@@ -40,7 +61,12 @@ internal data class KeyConfig(
         on = (ep["on"] as? List<*>)?.filterIsInstance<String>()?.toSet() ?: setOf(ErrorPromptConfig.KIND_EXCEPTION),
         minHoursBetween = (ep["minHoursBetween"] as? Number)?.toDouble()?.coerceAtLeast(0.0) ?: 24.0,
       )
-      return KeyConfig(verification, prompt, m["screenshots"] as? Boolean ?: true)
+      val categories = (m["categories"] as? List<*>)
+        ?.mapNotNull { w -> Category.values().firstOrNull { it.wire == w } }
+        ?.distinct()
+        ?.takeIf { it.isNotEmpty() }
+        ?: Category.values().toList()
+      return KeyConfig(verification, prompt, m["screenshots"] as? Boolean ?: true, categories)
     }
   }
 }

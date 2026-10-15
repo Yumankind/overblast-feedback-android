@@ -53,6 +53,8 @@ public class FeedbackOptions @JvmOverloads constructor(
 /** The sheet's words. Replace any of them; a refusal from the server is shown in the server's own sentence. */
 public data class FeedbackStrings(
   public val title: String = "Send feedback",
+  /** The title when the key takes bug reports only (§2): no category choice, a problem report. */
+  public val titleProblem: String = "Report a problem",
   public val subtitle: String = "Tell the team what went wrong, or what would make this better.",
   public val messageHint: String = "What happened? What did you expect?",
   public val categoryBug: String = "Bug",

@@ -88,6 +88,9 @@ internal class FeedbackSheet(
   private val afterCrash: Boolean = false,
   /** False when the key has screenshots off (§2.1): the frozen screen is still there to point at, never attached. */
   private val offerScreenshot: Boolean = true,
+  /** The categories the key takes (§2), the first being [initialCategory]'s fallback; with one, no choice is shown. */
+  private val categories: List<Category> = Category.values().toList(),
+  private val initialCategory: Category = categories.first(),
   private val hitTest: (Float, Float) -> SelectedElement?,
   private val submit: (SheetDraft, (FeedbackResult) -> Unit) -> Unit,
   private val onClosed: () -> Unit,
@@ -96,7 +99,7 @@ internal class FeedbackSheet(
   private val palette = Palette(isDark(activity))
   private val density = activity.resources.displayMetrics.density
 
-  private var category = Category.BUG
+  private var category = initialCategory
   private var selected: SelectedElement? = null
   private var highlightedCache: Bitmap? = null
   private var sending = false
@@ -159,17 +162,19 @@ internal class FeedbackSheet(
     val scroll = ScrollView(ctx).apply { isFillViewport = false; addView(body) }
     sheet.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
-    body.addView(label(strings.title, 20f, palette.text, bold = true))
+    val bugOnly = categories == listOf(Category.BUG)
+    body.addView(label(if (bugOnly) strings.titleProblem else strings.title, 20f, palette.text, bold = true))
     body.addView(label(strings.subtitle, 14f, palette.secondary).apply { setPadding(0, dp(4f), 0, dp(14f)) })
 
     // Category
     val chipRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-    chips = listOf(
+    val names = mapOf(
       Category.BUG to strings.categoryBug,
       Category.IDEA to strings.categoryIdea,
       Category.QUESTION to strings.categoryQuestion,
       Category.OTHER to strings.categoryOther,
-    ).map { (c, text) ->
+    )
+    chips = categories.map { it to names.getValue(it) }.map { (c, text) ->
       val chip = label(text, 14f, palette.text).apply {
         gravity = Gravity.CENTER
         setPadding(dp(14f), dp(7f), dp(14f), dp(7f))
@@ -180,7 +185,8 @@ internal class FeedbackSheet(
       chipRow.addView(chip, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(8f) })
       c to chip
     }
-    body.addView(HorizontalScroll(ctx, chipRow))
+    // One category is no choice: nothing to show.
+    if (categories.size > 1) body.addView(HorizontalScroll(ctx, chipRow))
     paintChips()
 
     // Message
