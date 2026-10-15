@@ -16,7 +16,7 @@ android {
     minSdk = 24
     targetSdk = 36
     versionCode = 1
-    versionName = "0.2.0"
+    versionName = "0.2.1"
     // Production unless `-PfeedbackEndpoint=http://10.0.2.2:8787/v1/feedback` points the sample at a
     // server on the machine running the emulator.
     resValue("string", "feedback_endpoint", (project.findProperty("feedbackEndpoint") as String?) ?: "https://brain.deployd.network/v1/feedback")

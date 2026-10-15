@@ -249,7 +249,7 @@ public object OverblastFeedback {
 
   /**
    * The brand for everything the library draws from now on, in place of [FeedbackOptions.theme]: for
-   * a theme only known later, such as Compose's (`FeedbackTheme.fromMaterialTheme()` in `:compose`),
+   * a theme only known later, such as Compose's (`FeedbackTheme.fromMaterialTheme()` in `:compose-material3`),
    * or one that changes with the app's own setting. Null goes back to the options' theme.
    */
   @JvmStatic

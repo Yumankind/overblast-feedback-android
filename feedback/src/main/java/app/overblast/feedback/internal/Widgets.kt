@@ -2,6 +2,7 @@ package app.overblast.feedback.internal
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
@@ -11,6 +12,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.EditText
+import android.widget.Switch
 import android.widget.TextView
 
 // THE LIBRARY'S FEW WIDGETS, themed from one [Look]: labels, fields, three kinds of button and a chip.
@@ -42,6 +44,31 @@ internal class Widgets(private val ctx: Context, val look: Look) {
       cornerRadius = corner(0.75f)
     }
     setPadding(dp(14f), dp(12f), dp(14f), dp(12f))
+    // The selection and the cursor would otherwise come from the activity's theme, which is not the
+    // sheet's when the app has said light or dark itself (FeedbackTheme.dark); the accent reads on both.
+    highlightColor = ColorMath.argb(0x66, ColorMath.r(p.accent), ColorMath.g(p.accent), ColorMath.b(p.accent))
+    if (android.os.Build.VERSION.SDK_INT >= 29) {
+      textCursorDrawable = GradientDrawable().apply {
+        setColor(p.accent)
+        setSize(dp(2f), 0)
+      }
+    }
+  }
+
+  /**
+   * An on/off switch in the sheet's colours. The platform's switch takes its thumb and track from the
+   * activity's theme, and when the sheet is dark over a light activity (or the other way round) that
+   * track all but vanishes, so both are tinted here: the accent when on, a grey that reads on this
+   * sheet when off.
+   */
+  fun switch(): Switch = Switch(ctx).apply {
+    val on = intArrayOf(android.R.attr.state_checked)
+    val off = intArrayOf()
+    val offThumb = if (p.dark) ColorMath.rgb(0xE5, 0xE5, 0xEA) else ColorMath.WHITE
+    val offTrack = ColorMath.argb(0x73, ColorMath.r(p.secondary), ColorMath.g(p.secondary), ColorMath.b(p.secondary))
+    val onTrack = ColorMath.argb(0x80, ColorMath.r(p.accent), ColorMath.g(p.accent), ColorMath.b(p.accent))
+    thumbTintList = ColorStateList(arrayOf(on, off), intArrayOf(p.accent, offThumb))
+    trackTintList = ColorStateList(arrayOf(on, off), intArrayOf(onTrack, offTrack))
   }
 
   fun textButton(text: String, color: Int = p.accent, onClick: () -> Unit): TextView = label(text, 15f, color, bold = true).apply {

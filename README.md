@@ -33,24 +33,24 @@ dependencyResolutionManagement {
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("com.github.Yumankind.overblast-feedback-android:feedback:0.2.0")
-    implementation("com.github.Yumankind.overblast-feedback-android:compose:0.2.0")           // optional
-    implementation("com.github.Yumankind.overblast-feedback-android:compose-material3:0.2.0") // optional
-    implementation("com.github.Yumankind.overblast-feedback-android:okhttp:0.2.0")            // optional
+    implementation("com.github.Yumankind.overblast-feedback-android:feedback:0.2.1")
+    implementation("com.github.Yumankind.overblast-feedback-android:compose:0.2.1")           // optional
+    implementation("com.github.Yumankind.overblast-feedback-android:compose-material3:0.2.1") // optional
+    implementation("com.github.Yumankind.overblast-feedback-android:okhttp:0.2.1")            // optional
 }
 ```
 
 | Artifact | Add it when | What it brings |
 |---|---|---|
 | `feedback` | always | The library. No AndroidX, Material, OkHttp or JSON library |
-| `compose` | the app has Compose screens | Tap-to-select inside Compose, `Modifier.overblastPrivate()`; Compose UI, which the app has |
-| `compose-material3` | the app uses a Material 3 `MaterialTheme` and wants the sheet in its colours | `FeedbackTheme.fromMaterialTheme()`; Material 3, which the app has |
+| `compose` | the app has Compose screens | Tap-to-select inside Compose, `Modifier.overblastPrivate()`, `withComposeAppearance()`; Compose UI, which the app has |
+| `compose-material3` | the app uses a Material 3 `MaterialTheme` and wants the sheet in its colours | `FeedbackTheme.fromMaterialTheme()`, light or dark included; Material 3, which the app has |
 | `okhttp` | the app uses OkHttp | The interceptor that records calls; uses the app's own OkHttp |
 
 The version is a tag on this repository; JitPack builds it on first request. This repository has
 four published modules, and JitPack serves a multi-module repository under
 `com.github.<owner>.<repo>:<module>`, which is where the lines above come from. The shorter
-`com.github.Yumankind:overblast-feedback-android:0.2.0` also resolves, but it brings **every** module,
+`com.github.Yumankind:overblast-feedback-android:0.2.1` also resolves, but it brings **every** module,
 Compose and Material 3 included, so name the modules you want instead.
 
 `:feedback` depends on nothing but the Android framework and the Kotlin standard library: no AndroidX,
@@ -115,7 +115,7 @@ fades.
 
 Everything the library draws (the sheet, its chips and buttons, the pointer and editor screens, the
 error prompt and the crash question) takes your brand from one `FeedbackTheme`; light or dark follows
-the activity.
+the activity unless the theme says otherwise (see Dark mode below).
 
 ```kotlin
 FeedbackOptions(theme = FeedbackTheme(accent = 0xFF6D28D9.toInt(), typeface = brandFont, cornerRadiusDp = 20f))
@@ -135,6 +135,26 @@ LaunchedEffect(theme) { OverblastFeedback.setTheme(theme) }
 
 `OverblastFeedback.setTheme(theme)` changes the brand at runtime (null goes back to the options').
 Material 3 lives only in `compose-material3`, so an app without it never meets a Material class.
+
+### Dark mode
+
+By default the sheet is light or dark as the activity's theme is (`android:isLightTheme` on Android 10
+and later, the activity's night mode before that). That is wrong for an app whose light or dark is
+not its activity's: one with its own Dark setting applied by overriding Compose's configuration, or a
+light-only activity theme drawing a dark app. Such an app says which it is, and the sheet, its fields,
+chips and switch, the "Sent" confirmation, the editor's chips and the crash question all follow:
+
+```kotlin
+FeedbackTheme(accent = brand, dark = true)          // always dark; false is always light
+theme.withDark(settings.darkLook)                   // the same brand, light or dark changed; null follows the activity
+FeedbackTheme.fromMaterialTheme()                   // dark when the Material 3 scheme's background is dark
+FeedbackTheme(accent = brand).withComposeAppearance() // from Compose's LocalConfiguration where it is called (`compose`)
+```
+
+`fromMaterialTheme()` sets it from the colour scheme (a background with a relative luminance under
+one half is dark), so an app that already passes it gets a matching sheet with no other change.
+Call `OverblastFeedback.setTheme(...)` again when the app's own setting changes. `dark` is new in
+0.2.1; a theme that does not set it behaves exactly as in 0.2.0.
 
 ## Options
 

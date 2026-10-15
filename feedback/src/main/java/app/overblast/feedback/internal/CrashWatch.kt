@@ -101,7 +101,16 @@ internal class CrashWatch(
     /** The small question, on [activity]. [send] opens the report; anything else declines it. */
     fun offer(activity: Activity, strings: FeedbackStrings, look: Look, send: () -> Unit, decline: () -> Unit) {
       var answered = false
-      val dialog = AlertDialog.Builder(activity)
+      // The platform's dialog draws itself from the activity's theme. When the app has said light or
+      // dark itself (FeedbackTheme.dark) and the activity disagrees, the device's own alert theme of the
+      // right kind is used instead, so the question matches the sheet it leads to; otherwise the
+      // activity's dialog theme is kept, as it always was.
+      val builder = if (look.dark != isDark(activity)) {
+        AlertDialog.Builder(activity, if (look.dark) android.R.style.Theme_DeviceDefault_Dialog_Alert else android.R.style.Theme_DeviceDefault_Light_Dialog_Alert)
+      } else {
+        AlertDialog.Builder(activity)
+      }
+      val dialog = builder
         .setMessage(strings.crashOffer)
         .setPositiveButton(strings.crashOfferSend) { _, _ ->
           answered = true

@@ -283,7 +283,7 @@ internal class FeedbackSheet(
       minimumHeight = w.dp(48f)
     }
     row.addView(w.label(strings.includeScreenshot, 15f), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-    val sw = Switch(activity).apply {
+    val sw = w.switch().apply {
       isChecked = false
       contentDescription = strings.includeScreenshot
       setOnCheckedChangeListener { _, on -> includeShot = on; refresh() }

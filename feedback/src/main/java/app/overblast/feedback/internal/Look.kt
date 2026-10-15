@@ -10,7 +10,7 @@ import android.util.TypedValue
 import android.widget.TextView
 import app.overblast.feedback.FeedbackTheme
 
-// THE RESOLVED LOOK: light or dark from the activity, the accent from the app (or its theme), the
+// THE RESOLVED LOOK: light or dark from the theme or else the activity, the accent from the app (or its theme), the
 // typeface and the corner radius. Every screen the library draws takes one of these, so a brand set
 // once in FeedbackOptions reaches the sheet, the pointer, the editor, the pill and the crash question.
 
@@ -52,7 +52,7 @@ internal class Look(
 
   companion object {
     fun of(activity: Activity, theme: FeedbackTheme): Look {
-      val dark = isDark(activity)
+      val dark = Appearance.resolve(theme.dark) { isDark(activity) }
       val sheet = Palette(dark).sheet
       val accent = ThemeMath.resolveAccent(
         explicit = theme.accent,
@@ -85,6 +85,17 @@ internal class Look(
       return scale > 0f
     }
   }
+}
+
+/**
+ * LIGHT OR DARK, DECIDED ONCE. The theme's explicit [FeedbackTheme.dark] wins, because an app that
+ * says it is dark knows something the activity does not: Compose lets an app override its own
+ * configuration (an in-app Dark look) while the activity's resources keep the system's. Only when the
+ * app says nothing does the activity decide, which is exactly what 0.2.0 did. [activityDark] is a
+ * function so the activity's theme is not read when the answer is already known.
+ */
+internal object Appearance {
+  inline fun resolve(explicit: Boolean?, activityDark: () -> Boolean): Boolean = explicit ?: activityDark()
 }
 
 /**

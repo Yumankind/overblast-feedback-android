@@ -29,6 +29,12 @@ android {
     targetCompatibility = JavaVersion.VERSION_17
   }
 
+  testOptions {
+    // The tests exercise pure decisions; this only stops a stray framework call from failing them with
+    // "Method ... not mocked".
+    unitTests.isReturnDefaultValues = true
+  }
+
   publishing {
     singleVariant("release") {
       withSourcesJar()
@@ -51,6 +57,7 @@ dependencies {
   implementation(platform(libs.compose.bom))
   implementation(libs.compose.ui)
   implementation(libs.compose.material3)
+  testImplementation(libs.junit)
 }
 
 afterEvaluate {
