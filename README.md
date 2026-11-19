@@ -33,10 +33,10 @@ dependencyResolutionManagement {
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("com.github.Yumankind.overblast-feedback-android:feedback:0.2.1")
-    implementation("com.github.Yumankind.overblast-feedback-android:compose:0.2.1")           // optional
-    implementation("com.github.Yumankind.overblast-feedback-android:compose-material3:0.2.1") // optional
-    implementation("com.github.Yumankind.overblast-feedback-android:okhttp:0.2.1")            // optional
+    implementation("com.github.Yumankind.overblast-feedback-android:feedback:0.2.2")
+    implementation("com.github.Yumankind.overblast-feedback-android:compose:0.2.2")           // optional
+    implementation("com.github.Yumankind.overblast-feedback-android:compose-material3:0.2.2") // optional
+    implementation("com.github.Yumankind.overblast-feedback-android:okhttp:0.2.2")            // optional
 }
 ```
 
@@ -50,7 +50,7 @@ dependencies {
 The version is a tag on this repository; JitPack builds it on first request. This repository has
 four published modules, and JitPack serves a multi-module repository under
 `com.github.<owner>.<repo>:<module>`, which is where the lines above come from. The shorter
-`com.github.Yumankind:overblast-feedback-android:0.2.1` also resolves, but it brings **every** module,
+`com.github.Yumankind:overblast-feedback-android:0.2.2` also resolves, but it brings **every** module,
 Compose and Material 3 included, so name the modules you want instead.
 
 `:feedback` depends on nothing but the Android framework and the Kotlin standard library: no AndroidX,
