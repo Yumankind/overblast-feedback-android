@@ -175,22 +175,54 @@ internal class SessionFiles(private val root: File) {
 }
 
 /**
- * THE DECISION, as a table (§3.4): a session that closed is never offered; one that did not is
- * described by the handler's record when it wrote one (it has the message and the stack), then by
- * `ApplicationExitInfo`, then by the marker alone. Records older than the session are someone else's.
+ * THE DECISION, as a table (§3.4): a session that closed is never offered. One that did not is offered
+ * only when something says it crashed: the handler's record (it has the message and the stack), or an
+ * `ApplicationExitInfo` reason that is a crash, an ANR, or the system killing the app for memory or for
+ * its own runaway use of resources. Every other end of a session left open is not the app's fault and
+ * is not offered: an update installed over the running app, a WebView or Play services update, a
+ * signal, the app ending itself, a permission revoked in settings, a stop the person asked for. On
+ * API 30 and later an open marker with no record at all is the device shutting down or rebooting
+ * (which writes no exit record), so it is not offered either; below 30 there is nothing better than
+ * the marker, and it is still offered as `unknown`. Records older than the session are someone else's.
  */
 internal object CrashDecision {
   // `ApplicationExitInfo.REASON_*`, as numbers, so this table runs on a JVM.
+  const val REASON_EXIT_SELF = 1
+  const val REASON_SIGNALED = 2
   const val REASON_LOW_MEMORY = 3
   const val REASON_CRASH = 4
   const val REASON_CRASH_NATIVE = 5
   const val REASON_ANR = 6
+  const val REASON_INITIALIZATION_FAILURE = 7
+  const val REASON_PERMISSION_CHANGE = 8
+  const val REASON_EXCESSIVE_RESOURCE_USAGE = 9
   const val REASON_USER_REQUESTED = 10
   const val REASON_USER_STOPPED = 11
+  const val REASON_DEPENDENCY_DIED = 12
+  const val REASON_OTHER = 13
+  const val REASON_FREEZER = 14
+  const val REASON_PACKAGE_STATE_CHANGE = 15
+  const val REASON_PACKAGE_UPDATED = 16
+
+  /** `ApplicationExitInfo` exists from API 30 (Android 11). */
+  const val EXIT_INFO_SDK = 30
+
+  /**
+   * The exit reasons that are the app's own failure, and so worth the question. Initialization failure
+   * is left out: it describes a process that never finished starting, which cannot be the session that
+   * opened the marker, and a slow attach is as often the device being busy as the app.
+   */
+  val OFFERED_REASONS: Set<Int> = setOf(
+    REASON_CRASH,
+    REASON_CRASH_NATIVE,
+    REASON_ANR,
+    REASON_LOW_MEMORY,
+    REASON_EXCESSIVE_RESOURCE_USAGE,
+  )
 
   fun kindFor(reason: Int): String = when (reason) {
     REASON_CRASH, REASON_CRASH_NATIVE -> "crash"
-    REASON_ANR -> "killed"
+    REASON_ANR, REASON_EXCESSIVE_RESOURCE_USAGE -> "killed"
     REASON_LOW_MEMORY -> "oom"
     else -> "unknown"
   }
@@ -199,13 +231,16 @@ internal object CrashDecision {
   fun pickExit(exits: List<ExitRecord>, sessionStart: Long): ExitRecord? =
     exits.filter { it.timestamp >= sessionStart }.maxByOrNull { it.timestamp }
 
-  fun decide(marker: SessionMarker?, handler: HandlerRecord?, exit: ExitRecord?): CrashInfo? {
+  /**
+   * Whether the previous session is worth "The app closed unexpectedly. Send a report?", and what to
+   * say about it. [sdkInt] is the device's `Build.VERSION.SDK_INT`, passed in so this stays a JVM test.
+   */
+  fun decide(marker: SessionMarker?, handler: HandlerRecord?, exit: ExitRecord?, sdkInt: Int): CrashInfo? {
     if (marker == null || marker.closed) return null
     val h = handler?.takeIf { it.at >= marker.start }
     val x = exit?.takeIf { it.timestamp >= marker.start }
-    // The person (or a tool on their behalf) stopped the app: a force stop, a reset from settings. Not a crash.
-    if (h == null && x != null && (x.reason == REASON_USER_REQUESTED || x.reason == REASON_USER_STOPPED)) return null
     return when {
+      // The library saw the exception itself: a crash, whatever ended the process afterwards.
       h != null -> CrashInfo(
         kind = "exception",
         at = h.at,
@@ -213,7 +248,15 @@ internal object CrashDecision {
         stack = h.stack.ifBlank { null },
         source = "handler",
       )
-      x != null -> CrashInfo(kindFor(x.reason), x.timestamp, x.description?.ifBlank { null }, null, "exit_info")
+      x != null ->
+        if (x.reason in OFFERED_REASONS) {
+          CrashInfo(kindFor(x.reason), x.timestamp, x.description?.ifBlank { null }, null, "exit_info")
+        } else {
+          null
+        }
+      // No record at all. From API 30 every process death the system sees writes an exit record, so
+      // none means the device itself went down (shut down, rebooted, ran out of battery).
+      sdkInt >= EXIT_INFO_SDK -> null
       else -> CrashInfo("unknown", null, null, null, "marker")
     }
   }

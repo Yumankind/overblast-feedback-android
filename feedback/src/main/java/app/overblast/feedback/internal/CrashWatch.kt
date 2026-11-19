@@ -18,7 +18,8 @@ import app.overblast.feedback.FeedbackStrings
 //    and then hands the crash to the handler that was there before, so the app still crashes exactly as
 //    it would have (the platform's handler shows the dialog and kills the process);
 //  - at the next start, `ApplicationExitInfo` (API 30+) for how the process ended, merged by
-//    [CrashDecision], and the offer on the first activity that resumes.
+//    [CrashDecision], and the offer on the first activity that resumes. Only a crash is offered: the
+//    handler's record, or an exit reason that is a crash, an ANR or a kill for memory or resources.
 
 internal class CrashWatch(
   private val app: Application,
@@ -35,8 +36,9 @@ internal class CrashWatch(
   /** At start, on the log thread: moves an unclosed session aside and decides whether it is worth an offer. */
   fun rollOver(withLogs: Boolean) {
     val (marker, handler) = files.rollOver() ?: return
-    val exit = if (Build.VERSION.SDK_INT >= 30) lastExit(marker.start) else null
-    val crash = CrashDecision.decide(marker, handler, exit)
+    val sdk = Build.VERSION.SDK_INT
+    val exit = if (sdk >= CrashDecision.EXIT_INFO_SDK) lastExit(marker.start) else null
+    val crash = CrashDecision.decide(marker, handler, exit, sdk)
     if (crash == null) {
       files.discardPrevious()
       return

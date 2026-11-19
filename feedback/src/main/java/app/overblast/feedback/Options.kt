@@ -24,9 +24,11 @@ import android.app.Activity
  *   the worker's per-device limits count real phones. It only happens when the key's verification in
  *   the console is `flag` or `require` (it is `off` by default); off here turns it off whatever the
  *   key says, and a key set to `require` then refuses the reports. See the README's "Device verification".
- * @property offerReportAfterCrash when the last session ended unexpectedly (a crash, an ANR, the system
- *   killing the app in the foreground), ask once at the next launch whether to send a report with that
- *   session's logs and what ended it. Off discards it unasked.
+ * @property offerReportAfterCrash when the last session crashed in the foreground (an uncaught exception,
+ *   a native crash, an ANR, the system killing the app for memory or excessive resource use), ask once
+ *   at the next launch whether to send a report with that session's logs and what ended it. An update,
+ *   a force stop, a reboot and other ends that are not the app's fault are not asked about. Off
+ *   discards it unasked. See the README's "After a crash".
  * @property errorPrompt allow the small "Something may have gone wrong. Tell us?" prompt after an
  *   error, when the key in the console has it on (it is off there by default). Off here turns it off
  *   for this app whatever the key says; on cannot turn on what the key has off.

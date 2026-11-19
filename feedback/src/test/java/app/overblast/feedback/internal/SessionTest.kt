@@ -120,39 +120,104 @@ class SessionTest {
     assertEquals("crash", CrashDecision.kindFor(5)) // REASON_CRASH_NATIVE
     assertEquals("killed", CrashDecision.kindFor(6)) // REASON_ANR
     assertEquals("oom", CrashDecision.kindFor(3)) // REASON_LOW_MEMORY
-    for (other in listOf(0, 1, 2, 7, 8, 9, 10, 11, 12, 13, 14)) assertEquals("unknown", CrashDecision.kindFor(other))
+    assertEquals("killed", CrashDecision.kindFor(9)) // REASON_EXCESSIVE_RESOURCE_USAGE
+    for (other in listOf(0, 1, 2, 7, 8, 10, 11, 12, 13, 14, 15, 16)) assertEquals("unknown", CrashDecision.kindFor(other))
   }
 
   @Test
   fun aClosedOrMissingMarkerIsNeverOffered() {
     val h = HandlerRecord(150, "m", "s")
     val x = ExitRecord(160, 4, "crash")
-    assertNull(CrashDecision.decide(null, h, x))
-    assertNull(CrashDecision.decide(SessionMarker(100, closed = true), h, x))
+    for (sdk in listOf(29, 30, 36)) {
+      assertNull(CrashDecision.decide(null, h, x, sdk))
+      assertNull(CrashDecision.decide(SessionMarker(100, closed = true), h, x, sdk))
+      assertNull(CrashDecision.decide(SessionMarker(100, closed = true), null, null, sdk))
+    }
   }
 
   @Test
   fun theHandlerWinsForMessageAndStack() {
-    val c = CrashDecision.decide(SessionMarker(100, false), HandlerRecord(150, "java.lang.NullPointerException", "at a.b"), ExitRecord(160, 4, "crash"))!!
+    val c = CrashDecision.decide(SessionMarker(100, false), HandlerRecord(150, "java.lang.NullPointerException", "at a.b"), ExitRecord(160, 4, "crash"), 34)!!
     assertEquals(CrashInfo("exception", 150, "java.lang.NullPointerException", "at a.b", "handler"), c)
   }
 
   @Test
   fun exitInfoAloneDescribesTheEnd() {
     assertEquals(CrashInfo("killed", 160, "user request after error: Input dispatching timed out", null, "exit_info"),
-      CrashDecision.decide(SessionMarker(100, false), null, ExitRecord(160, 6, "user request after error: Input dispatching timed out")))
-    assertEquals(CrashInfo("oom", 170, null, null, "exit_info"), CrashDecision.decide(SessionMarker(100, false), null, ExitRecord(170, 3, "")))
+      CrashDecision.decide(SessionMarker(100, false), null, ExitRecord(160, 6, "user request after error: Input dispatching timed out"), 34))
+    assertEquals(CrashInfo("oom", 170, null, null, "exit_info"), CrashDecision.decide(SessionMarker(100, false), null, ExitRecord(170, 3, ""), 34))
   }
 
   @Test
-  fun theMarkerAloneIsAnUnknownEnd() {
-    assertEquals(CrashInfo("unknown", null, null, null, "marker"), CrashDecision.decide(SessionMarker(100, false), null, null))
+  fun belowApi30TheMarkerAloneIsAnUnknownEnd() {
+    // No ApplicationExitInfo before Android 11: the open marker is all there is, so it is still offered.
+    assertEquals(CrashInfo("unknown", null, null, null, "marker"), CrashDecision.decide(SessionMarker(100, false), null, null, 29))
+    assertEquals(CrashInfo("unknown", null, null, null, "marker"), CrashDecision.decide(SessionMarker(100, false), null, null, 26))
+  }
+
+  @Test
+  fun fromApi30AnOpenMarkerWithNoRecordIsTheDeviceGoingDown() {
+    // A shutdown or reboot with the app in front (or an emulator closed under it) leaves no exit record.
+    for (sdk in listOf(30, 34, 36)) assertNull(CrashDecision.decide(SessionMarker(100, false), null, null, sdk))
+  }
+
+  @Test
+  fun aCrashAnAnrOrAKillForMemoryOrResourcesIsOffered() {
+    val m = SessionMarker(100, false)
+    for ((reason, kind) in listOf(
+      CrashDecision.REASON_CRASH to "crash",
+      CrashDecision.REASON_CRASH_NATIVE to "crash",
+      CrashDecision.REASON_ANR to "killed",
+      CrashDecision.REASON_LOW_MEMORY to "oom",
+      CrashDecision.REASON_EXCESSIVE_RESOURCE_USAGE to "killed",
+    )) {
+      assertEquals("reason $reason", CrashInfo(kind, 160, "why", null, "exit_info"), CrashDecision.decide(m, null, ExitRecord(160, reason, "why"), 34))
+    }
+  }
+
+  @Test
+  fun everyOtherExitReasonIsNotOffered() {
+    val m = SessionMarker(100, false)
+    val notCrashes = mapOf(
+      CrashDecision.REASON_EXIT_SELF to "System.exit / finishAffinity + exit",
+      CrashDecision.REASON_SIGNALED to "kill -9 from a tool",
+      CrashDecision.REASON_INITIALIZATION_FAILURE to "attach timeout",
+      CrashDecision.REASON_PERMISSION_CHANGE to "permission revoked in settings",
+      CrashDecision.REASON_USER_REQUESTED to "[FORCE STOP] stop app",
+      CrashDecision.REASON_USER_STOPPED to "stopped",
+      CrashDecision.REASON_DEPENDENCY_DIED to "depends on provider com.google.android.webview",
+      CrashDecision.REASON_OTHER to "other",
+      CrashDecision.REASON_FREEZER to "freezer",
+      CrashDecision.REASON_PACKAGE_STATE_CHANGE to "package disabled",
+      CrashDecision.REASON_PACKAGE_UPDATED to "update installed over the running app",
+      0 to "REASON_UNKNOWN",
+      99 to "a reason added after this library",
+    )
+    for ((reason, why) in notCrashes) {
+      assertNull("reason $reason", CrashDecision.decide(m, null, ExitRecord(160, reason, why), 34))
+      // Even below 30, where no exit record can exist, one that is not a crash is not offered.
+      assertNull("reason $reason", CrashDecision.decide(m, null, ExitRecord(160, reason, why), 29))
+    }
+  }
+
+  @Test
+  fun theHandlersRecordIsOfferedWhateverEndedTheProcess() {
+    val m = SessionMarker(100, false)
+    for (sdk in listOf(26, 29, 30, 34)) {
+      for (exit in listOf(null, ExitRecord(160, CrashDecision.REASON_PACKAGE_UPDATED, null), ExitRecord(160, CrashDecision.REASON_SIGNALED, null))) {
+        val c = CrashDecision.decide(m, HandlerRecord(150, "boom", "at a"), exit, sdk)
+        assertEquals("sdk $sdk, exit $exit", CrashInfo("exception", 150, "boom", "at a", "handler"), c)
+      }
+    }
   }
 
   @Test
   fun recordsOlderThanTheSessionAreSomeoneElses() {
-    val c = CrashDecision.decide(SessionMarker(100, false), HandlerRecord(50, "old", "old"), ExitRecord(40, 4, "old"))!!
-    assertEquals("marker", c.source)
+    val m = SessionMarker(100, false)
+    // Below 30 the stale records are ignored and the marker alone is offered…
+    assertEquals("marker", CrashDecision.decide(m, HandlerRecord(50, "old", "old"), ExitRecord(40, 4, "old"), 29)!!.source)
+    // …from 30 they are ignored too, which leaves no record of this session: the device went down.
+    assertNull(CrashDecision.decide(m, HandlerRecord(50, "old", "old"), ExitRecord(40, 4, "old"), 34))
     assertEquals(ExitRecord(300, 6, "b"), CrashDecision.pickExit(listOf(ExitRecord(90, 4, "x"), ExitRecord(200, 4, "a"), ExitRecord(300, 6, "b")), 100))
     assertNull(CrashDecision.pickExit(listOf(ExitRecord(90, 4, "x")), 100))
   }
@@ -249,11 +314,11 @@ class SessionTest {
   @Test
   fun aStopThePersonAskedForIsNotACrash() {
     val m = SessionMarker(100, false)
-    assertNull(CrashDecision.decide(m, null, ExitRecord(160, CrashDecision.REASON_USER_REQUESTED, "[FORCE STOP] stop app")))
-    assertNull(CrashDecision.decide(m, null, ExitRecord(160, CrashDecision.REASON_USER_STOPPED, "stopped")))
+    assertNull(CrashDecision.decide(m, null, ExitRecord(160, CrashDecision.REASON_USER_REQUESTED, "[FORCE STOP] stop app"), 34))
+    assertNull(CrashDecision.decide(m, null, ExitRecord(160, CrashDecision.REASON_USER_STOPPED, "stopped"), 34))
     // A crash the handler recorded is still a crash, whatever ended the process afterwards.
-    assertEquals("handler", CrashDecision.decide(m, HandlerRecord(150, "boom", "at a"), ExitRecord(160, CrashDecision.REASON_USER_REQUESTED, null))!!.source)
-    // A stale user stop from before this session does not hide an unknown end.
-    assertEquals("marker", CrashDecision.decide(m, null, ExitRecord(50, CrashDecision.REASON_USER_REQUESTED, null))!!.source)
+    assertEquals("handler", CrashDecision.decide(m, HandlerRecord(150, "boom", "at a"), ExitRecord(160, CrashDecision.REASON_USER_REQUESTED, null), 34)!!.source)
+    // A stale user stop from before this session does not hide an unknown end below 30.
+    assertEquals("marker", CrashDecision.decide(m, null, ExitRecord(50, CrashDecision.REASON_USER_REQUESTED, null), 29)!!.source)
   }
 }

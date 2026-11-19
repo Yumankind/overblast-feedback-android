@@ -175,7 +175,7 @@ OverblastFeedback.start(
         strings = FeedbackStrings(title = "Envoyer un avis" /* ... */),
         onResult = { result -> analytics.track("feedback", result.toString()) },
         deviceVerification = true,       // register this phone and sign reports, see Device verification
-        offerReportAfterCrash = true,    // ask once after an unexpected end, see After a crash
+        offerReportAfterCrash = true,    // ask once after a crash, see After a crash
         errorPrompt = true,              // allow the error prompt when the key has it on
         appHosts = listOf("api.example.com"), // your own API hosts, for the error prompt
         theme = FeedbackTheme(accent = 0xFF6D28D9.toInt()), // see The look
@@ -242,8 +242,8 @@ your own internal testers.
   JWTs, Luhn-valid card numbers, and `password=` / `token=` / `api_key:` pairs replaced by
   `[redacted]` as they are kept, before they are written to disk or leave the device. A crash's
   message and stack are redacted the same way. The disk copy lives in the app's own files directory,
-  which no other app can read, and is deleted at the next launch unless that session ended
-  unexpectedly (then once its report is offered).
+  which no other app can read, and is deleted at the next launch unless that session crashed
+  (then once its report is offered).
 - **Network** entries carry the method, the URL without its query string and fragment, the status and
   the time. No headers, no bodies.
 - The device id is a random UUID the library keeps in its own preferences, used only so the worker's
@@ -331,10 +331,10 @@ disk copy, no logcat process).
 
 ## After a crash
 
-When the app's last session ended while it was in front of the person (a crash, an ANR, the system
-killing it for memory), the next launch asks once, on the first screen, "The app closed unexpectedly.
-Send a report?". **Send report** opens the sheet with that session's saved logs and a `crash` section;
-**Not now** discards it. The task is titled `Crash: <message>`.
+When the app's last session crashed while it was in front of the person (an uncaught exception, a
+native crash, an ANR, the system killing it for memory), the next launch asks once, on the first
+screen, "The app closed unexpectedly. Send a report?". **Send report** opens the sheet with that
+session's saved logs and a `crash` section; **Not now** discards it. The task is titled `Crash: <message>`.
 
 How the library knows:
 
@@ -344,12 +344,33 @@ How the library knows:
 - its own default uncaught-exception handler, which writes the exception (message and redacted stack)
   and the log to disk synchronously, then hands the crash to the handler that was installed before it,
   so the app crashes exactly as it would have and any crash reporter you use still sees it;
-- on Android 11 and later, `ActivityManager.getHistoricalProcessExitReasons`: a crash or native crash
-  is `crash`, an ANR `killed`, low memory `oom`, anything else `unknown`. A stop the person asked for
-  (a force stop, or stopping the app from settings) is not a crash and is not offered.
+- on Android 11 and later, `ActivityManager.getHistoricalProcessExitReasons`, for how the process
+  ended.
 
-A session that ended with no record from either is sent as `kind: "unknown"`. Turn the question off
-with `FeedbackOptions(offerReportAfterCrash = false)`; the saved session is then discarded unasked.
+A session left open is offered only when one of these says it crashed:
+
+| What ended it | Offered as |
+| --- | --- |
+| the library's own handler caught an uncaught exception | `exception` |
+| `REASON_CRASH`, `REASON_CRASH_NATIVE` | `crash` |
+| `REASON_ANR` | `killed` |
+| `REASON_EXCESSIVE_RESOURCE_USAGE` (the system ended it for its own runaway CPU, binder or similar use) | `killed` |
+| `REASON_LOW_MEMORY` | `oom` |
+
+Nothing else is the app's fault, so nothing else is offered, and the saved session is discarded:
+an update installed over the running app (`REASON_PACKAGE_UPDATED`, which Android 14 and later use
+for Play, `adb install` and Android Studio alike), a WebView or Play services update
+(`REASON_DEPENDENCY_DIED`), a stop the person asked for (`REASON_USER_REQUESTED`,
+`REASON_USER_STOPPED`), a permission revoked in settings, a signal, the app ending itself
+(`REASON_EXIT_SELF`), `REASON_INITIALIZATION_FAILURE` (a process that never finished starting cannot
+be the session the person was using), `REASON_OTHER`, `REASON_FREEZER` and
+`REASON_PACKAGE_STATE_CHANGE`. On Android 11 and later a session with no record at all is the phone
+or emulator shutting down or rebooting with the app open, which writes no exit record, and is not
+offered either. Before Android 11 there are no exit records, so a session left open with no
+handler record is still offered, as `kind: "unknown"`.
+
+Turn the question off with `FeedbackOptions(offerReportAfterCrash = false)`; the saved session is
+then discarded unasked.
 
 Every report also says when it was opened (`openedAt`) and how (`trigger`: `shake`, `button` for your
 own `show()`, `api` for `report()`, `relaunch` for the offer), so the task can say what failed just
